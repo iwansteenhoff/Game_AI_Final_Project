@@ -12,6 +12,7 @@ WALL = "#"
 EMPTY = " "
 PELLET = "."
 POWER = "o"
+SPIKE = "^"
 
 Position = tuple[int, int]
 
@@ -54,6 +55,10 @@ def generate_maze(
 
         _add_pellets(grid, {pacman_start, *ghost_starts})
         _add_power_pellets(grid, config.power_pellets, distances)
+
+        spike_count = getattr(config, "spike_count", 0)
+        protected = {pacman_start, *ghost_starts}
+        _add_spikes(grid, spike_count, protected, distances)
 
         if is_valid_maze(grid, pacman_start, ghost_starts, config):
             return GeneratedMaze(grid, pacman_start, ghost_starts)
@@ -121,7 +126,8 @@ def is_valid_maze(
     if any(distances.get(ghost, 0) < config.min_start_distance for ghost in ghost_starts):
         return False
 
-    junction_count = sum(1 for cell in open_cells if len(neighbors(grid, cell)) >= 3)
+    junction_count = sum(1 for cell in open_cells if len(
+        neighbors(grid, cell)) >= 3)
     min_junctions = max(4, (len(grid) * len(grid[0])) // 60)
     return junction_count >= min_junctions
 
@@ -180,6 +186,82 @@ def _walkable_cells(grid: list[list[str]]) -> list[Position]:
     ]
 
 
+def _add_spikes(
+    grid: list[list[str]],
+    count: int,
+    protected: set[Position],
+    distances: dict[Position, int],
+) -> None:
+    if count <= 0:
+        return
+
+    candidates = [
+        pos
+        for pos, dist in distances.items()
+        if dist >= 4
+        and grid[pos[1]][pos[0]] == PELLET
+        and pos not in protected
+        and len(neighbors(grid, pos)) >= 2
+    ]
+    candidates.sort(key=lambda p: distances[p], reverse=True)
+    random.shuffle(candidates[: min(count * 4, len(candidates))])
+
+    def _safe_walkable_count(center: Position, radius: int = 2) -> int:
+        sx, sy = center
+        safe = 0
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = sx + dx, sy + dy
+                if ny < 0 or ny >= len(grid) or nx < 0 or nx >= len(grid[0]):
+                    continue
+                cell = grid[ny][nx]
+                if cell != WALL and cell != SPIKE:
+                    safe += 1
+        return safe
+
+    def _would_block_path(spike_pos: Position) -> bool:
+        x, y = spike_pos
+        grid[y][x] = SPIKE
+        walkable = _walkable_cells(grid)
+        grid[y][x] = PELLET
+        if not walkable:
+            return True
+
+        if not walkable:
+            return True
+
+        start = walkable[0]
+        visited = {start}
+        queue = deque([start])
+
+        while queue:
+            cx, cy = queue.popleft()
+            for nx, ny in neighbors(grid, (cx, cy)):
+                if (nx, ny) not in visited and grid[ny][nx] != WALL and grid[ny][nx] != SPIKE:
+                    visited.add((nx, ny))
+                    queue.append((nx, ny))
+
+        return len(visited) < len(walkable)
+
+    placed = 0
+    for x, y in candidates:
+        if placed >= count:
+            break
+
+        if _safe_walkable_count((x, y), radius=1) < 5:
+            continue
+
+        if any(grid[ny][nx] == SPIKE for nx, ny in neighbors(grid, (x, y))):
+            continue
+
+        if _would_block_path((x, y)):
+            continue
+        grid[y][x] = SPIKE
+        placed += 1
+
+
 def _choose_pacman_start(open_cells: list[Position]) -> Position:
     return min(open_cells, key=lambda cell: cell[0] + cell[1])
 
@@ -190,7 +272,8 @@ def _choose_ghost_starts(
     ghost_count: int,
     min_distance: int,
 ) -> list[Position]:
-    candidates = [cell for cell in open_cells if distances.get(cell, 0) >= min_distance]
+    candidates = [cell for cell in open_cells if distances.get(
+        cell, 0) >= min_distance]
     candidates.sort(key=lambda cell: distances.get(cell, 0), reverse=True)
     random.shuffle(candidates[: min(8, len(candidates))])
 
@@ -215,13 +298,48 @@ def _add_power_pellets(
     count: int,
     distances: dict[Position, int],
 ) -> None:
+    if count <= 0:
+        return
+
     pellet_cells = [
         pos
         for pos, dist in distances.items()
         if dist > 4 and grid[pos[1]][pos[0]] == PELLET
     ]
-    pellet_cells.sort(key=lambda pos: distances[pos], reverse=True)
-    selected = pellet_cells[: max(0, count)]
+    if not pellet_cells:
+        return
+
+    width = len(grid[0])
+    height = len(grid)
+    center = (width // 2, height // 2)
+
+    def _distance_to_selected(cell: Position, selected: list[Position]) -> int:
+        if not selected:
+            return 10_000
+        return min(abs(cell[0] - other[0]) + abs(cell[1] - other[1]) for other in selected)
+
+    selected: list[Position] = []
+
+    middle_candidate = min(
+        pellet_cells,
+        key=lambda pos: abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
+    )
+    if abs(middle_candidate[0] - center[0]) + abs(middle_candidate[1] - center[1]) <= 2:
+        selected.append(middle_candidate)
+
+    while len(selected) < count:
+        remaining = [cell for cell in pellet_cells if cell not in selected]
+        if not remaining:
+            break
+        next_cell = max(
+            remaining,
+            key=lambda cell: (
+                _distance_to_selected(cell, selected),
+                distances[cell],
+            ),
+        )
+        selected.append(next_cell)
+
     for x, y in selected:
         grid[y][x] = POWER
 

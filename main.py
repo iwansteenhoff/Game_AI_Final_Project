@@ -6,7 +6,7 @@ import pygame
 
 from agents import ghost_heuristic, ghost_mcts, ghost_random
 from game.difficulty import get_config, performance_score, update_difficulty
-from game.maze_generator import PELLET, POWER, WALL, generate_maze
+from game.maze_generator import PELLET, POWER, SPIKE, WALL, generate_maze
 from game.pacman_env import PacmanEnv
 
 CELL_SIZE = 28
@@ -21,6 +21,9 @@ PELLET_COLOR = (246, 217, 139)
 POWER_COLOR = (126, 224, 170)
 PACMAN_YELLOW = (255, 213, 64)
 GHOST_RED = (234, 74, 91)
+GHOST_FRIGHTENED = (58, 110, 220)
+GHOST_FLASH = (230, 230, 255)
+SPIKE_COLOR = (255, 100, 40)
 TEXT = (238, 242, 255)
 
 KEY_TO_ACTION = {
@@ -102,6 +105,7 @@ def create_environment(difficulty: int) -> PacmanEnv:
         generated.pacman_start,
         generated.ghost_starts,
         max_steps=GRID_WIDTH * GRID_HEIGHT * 2,
+        frighten_duration=config.frighten_duration,
     )
 
 
@@ -136,6 +140,18 @@ def draw(
                 pygame.draw.circle(screen, PELLET_COLOR, center, 3)
             elif tile == POWER:
                 pygame.draw.circle(screen, POWER_COLOR, center, 7)
+            elif tile == SPIKE:
+                # Draw three upward-pointing triangles (spike cluster)
+                cx, cy = center
+                pad = CELL_SIZE // 2 - 4
+                tip_y = cy - pad
+                base_y = cy + pad - 2
+                half_w = pad - 1
+                pygame.draw.polygon(
+                    screen,
+                    SPIKE_COLOR,
+                    [(cx, tip_y), (cx - half_w, base_y), (cx + half_w, base_y)],
+                )
 
     px, py = env.pacman_pos
     pygame.draw.circle(
@@ -145,9 +161,16 @@ def draw(
         CELL_SIZE // 2 - 4,
     )
 
-    for gx, gy in env.ghost_positions:
+    for i, (gx, gy) in enumerate(env.ghost_positions):
+        timer = env.ghost_frighten_timers[i] if i < len(env.ghost_frighten_timers) else 0
+        if timer > 0:
+            # Flash white when 5 or fewer steps remain
+            flash = timer <= 5 and (env.steps % 2 == 0)
+            color = GHOST_FLASH if flash else GHOST_FRIGHTENED
+        else:
+            color = GHOST_RED
         ghost_rect = pygame.Rect(gx * CELL_SIZE + 5, gy * CELL_SIZE + 5, CELL_SIZE - 10, CELL_SIZE - 10)
-        pygame.draw.rect(screen, GHOST_RED, ghost_rect, border_radius=5)
+        pygame.draw.rect(screen, color, ghost_rect, border_radius=5)
 
     config = get_config(difficulty)
     score_text = (
