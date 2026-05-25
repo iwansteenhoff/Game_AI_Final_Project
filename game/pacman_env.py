@@ -47,13 +47,13 @@ class PacmanEnv:
         self.won = False
         self.lost = False
         self.pellets_collected = 0
-        self.total_pellets = sum(tile in {PELLET, POWER} for row in self.grid for tile in row)
-        # Maps ghost index -> steps remaining while frightened (0 = normal)
+        self.total_pellets = sum(tile in {PELLET, POWER}
+                                 for row in self.grid for tile in row)
+
         self.ghost_frighten_timers: list[int] = [0] * len(self.ghost_starts)
 
     @property
     def frightened_ghosts(self) -> set[int]:
-        """Indices of currently frightened ghosts."""
         return {i for i, t in enumerate(self.ghost_frighten_timers) if t > 0}
 
     def step(self, pacman_action: str, ghost_actions: list[str]) -> StepResult:
@@ -65,8 +65,8 @@ class PacmanEnv:
         ghosts_eaten = 0
         self.steps += 1
 
-        # Tick down frighten timers
-        self.ghost_frighten_timers = [max(0, t - 1) for t in self.ghost_frighten_timers]
+        self.ghost_frighten_timers = [max(0, t - 1)
+                                      for t in self.ghost_frighten_timers]
 
         self.pacman_pos = self.next_position(self.pacman_pos, pacman_action)
         px, py = self.pacman_pos
@@ -81,25 +81,21 @@ class PacmanEnv:
             self.grid[py][px] = " "
             self.pellets_collected += 1
             if power_collected:
-                # Frighten all surviving ghosts
                 self.ghost_frighten_timers = [
                     self.frighten_duration if pos is not None else 0
                     for pos in self.ghost_positions
                 ]
 
-        # Check collisions with ghosts after Pacman moves
         ghosts_eaten += self._resolve_pacman_ghost_collisions()
         if self.lost:
             return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
 
-        # Move ghosts
         for index, action in enumerate(ghost_actions):
             if index < len(self.ghost_positions):
                 self.ghost_positions[index] = self.next_position(
                     self.ghost_positions[index], action
                 )
 
-        # Check collisions again after ghosts move
         ghosts_eaten += self._resolve_pacman_ghost_collisions()
         if self.lost:
             return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
@@ -112,19 +108,19 @@ class PacmanEnv:
         return StepResult(self.won, self.lost, pellet_collected, power_collected, ghosts_eaten)
 
     def _resolve_pacman_ghost_collisions(self) -> int:
-        """Handle all Pacman/ghost overlaps. Returns number of ghosts eaten."""
         eaten = 0
         indices_to_remove = []
         for i, ghost_pos in enumerate(self.ghost_positions):
             if ghost_pos == self.pacman_pos:
                 if self.ghost_frighten_timers[i] > 0:
-                    # Eat the ghost — mark for removal
                     indices_to_remove.append(i)
                     eaten += 1
                 else:
                     self.lost = True
                     return eaten
-        # Remove eaten ghosts in reverse order to keep indices valid
+
+        # TODO: Handle what happens when ghosts are eaten (respawn? removed from game?)
+        # For now, we just remove them from the game.
         for i in reversed(indices_to_remove):
             self.ghost_positions.pop(i)
             self.ghost_frighten_timers.pop(i)
