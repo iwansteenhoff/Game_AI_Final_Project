@@ -53,7 +53,7 @@ class PacmanEnv:
         self.lost = False
         self.pellets_collected = 0
         self.power_pellets_collected = 0
-        self.ghosts_eaten = False
+        self.ghosts_eaten = 0
         self.deaths_to_ghost = 0
         self.power_timer = 0
         self.total_pellets = sum(tile in {PELLET, POWER} for row in self.grid for tile in row)

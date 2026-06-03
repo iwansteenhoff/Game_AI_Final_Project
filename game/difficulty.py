@@ -36,17 +36,17 @@ class RunMetrics:
 
 
 DIFFICULTY_LEVELS: dict[int, DifficultyConfig] = {
-    0: DifficultyConfig("random", 1, 6, 0.60, 18, ghost_aggression=0.0),
-    1: DifficultyConfig("random", 2, 5, 0.56, 16, ghost_aggression=0.0),
-    2: DifficultyConfig("heuristic", 2, 4, 0.53, 15, ghost_aggression=0.35),
-    3: DifficultyConfig("heuristic", 2, 3, 0.49, 13, ghost_aggression=0.60),
-    4: DifficultyConfig("heuristic", 3, 2, 0.45, 11, ghost_aggression=0.80),
-    5: DifficultyConfig("mcts", 3, 1, 0.41, 9, ghost_speed=2, ghost_aggression=0.85),
+    0: DifficultyConfig("random", 1, 9, 0.66, 24, ghost_aggression=0.0),
+    1: DifficultyConfig("random", 1, 8, 0.63, 22, ghost_aggression=0.0),
+    2: DifficultyConfig("heuristic", 1, 7, 0.60, 20, ghost_aggression=0.08),
+    3: DifficultyConfig("heuristic", 2, 6, 0.57, 18, ghost_aggression=0.18),
+    4: DifficultyConfig("heuristic", 2, 5, 0.54, 16, ghost_aggression=0.32),
+    5: DifficultyConfig("mcts", 2, 4, 0.50, 14, ghost_speed=1, ghost_aggression=0.45),
 }
 
 
-TARGET_LOW = 0.40
-TARGET_HIGH = 0.68
+TARGET_LOW = 0.45
+TARGET_HIGH = 0.75
 
 
 def clamp_difficulty(level: int) -> int:

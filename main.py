@@ -59,7 +59,7 @@ def main() -> int:
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("arial", 18)
 
-    difficulty = 2
+    difficulty = 1
     profile = PlayerProfile(history_size=5)
     env = create_environment(difficulty)
     current_action = "STAY"

@@ -453,10 +453,10 @@ def _choose_ghost_starts(
 ) -> list[Position]:
     candidates = [cell for cell in open_cells if distances.get(
         cell, 0) >= min_distance]
-    candidates.sort(key=lambda cell: distances.get(cell, 0), reverse=True)
-    top_candidates = candidates[: min(8, len(candidates))]
+    candidates.sort(key=lambda cell: distances.get(cell, 0))
+    top_candidates = candidates[: min(12, len(candidates))]
     random.shuffle(top_candidates)
-    candidates = top_candidates + candidates[min(8, len(candidates)):]
+    candidates = top_candidates + candidates[min(12, len(candidates)):]
 
     starts: list[Position] = []
     for cell in candidates:
