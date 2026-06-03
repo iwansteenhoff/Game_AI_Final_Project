@@ -40,12 +40,16 @@ def performance_score(
     total_pellets: int,
     steps_survived: int,
     max_steps: int,
+    traveled_steps: int,
+    generated_greedy_solution: int,
     won: bool,
+    win_streak: int,
 ) -> float:
     pellet_completion = pellets_collected / max(1, total_pellets)
     survival_score = min(1.0, steps_survived / max(1, max_steps))
-    win_bonus = 1.0 if won else 0.0
-    return (0.5 * pellet_completion) + (0.3 * survival_score) + (0.2 * win_bonus)
+    solution_score = min(1.0, generated_greedy_solution / max(1, traveled_steps))
+    win_factor = 1.0 if won else 0.0
+    return (0.5 * pellet_completion) + (0.3 * survival_score) + (win_factor * (0.2 + solution_score)) + (0.1 * win_streak)
 
 
 def update_difficulty(level: int, performance: float) -> int:

@@ -32,18 +32,21 @@ class PacmanEnv:
         ghost_starts: list[Position],
         max_steps: int = 700,
         frighten_duration: int = 20,
+        generated_greedy_solution: int = 2**32,
     ) -> None:
         self.grid = [row[:] for row in grid]
         self.pacman_start = pacman_start
         self.ghost_starts = ghost_starts[:]
         self.max_steps = max_steps
         self.frighten_duration = frighten_duration
+        self.generated_greedy_solution = generated_greedy_solution
         self.reset()
 
     def reset(self) -> None:
         self.pacman_pos = self.pacman_start
         self.ghost_positions = self.ghost_starts[:]
         self.steps = 0
+        self.traveled_steps = 0
         self.won = False
         self.lost = False
         self.pellets_collected = 0
@@ -68,6 +71,7 @@ class PacmanEnv:
         self.ghost_frighten_timers = [max(0, t - 1)
                                       for t in self.ghost_frighten_timers]
 
+        old_x, old_y = self.pacman_pos
         self.pacman_pos = self.next_position(self.pacman_pos, pacman_action)
         px, py = self.pacman_pos
 
@@ -99,6 +103,9 @@ class PacmanEnv:
         ghosts_eaten += self._resolve_pacman_ghost_collisions()
         if self.lost:
             return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
+
+        if (old_x, old_y) != self.pacman_pos:
+            self.traveled_steps += 1
 
         if self.pellets_collected >= self.total_pellets:
             self.won = True
@@ -151,6 +158,7 @@ class PacmanEnv:
         nx, ny = pos[0] + dx, pos[1] + dy
         if self.grid[ny][nx] == WALL:
             return pos
+        ###### TODO: Keep track of total steps in current level
         return nx, ny
 
     def shortest_path_distance(self, start: Position, goal: Position) -> int:

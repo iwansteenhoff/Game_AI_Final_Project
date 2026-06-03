@@ -5,8 +5,10 @@ import sys
 import pygame
 
 from agents import ghost_heuristic, ghost_mcts, ghost_random
+
+import game
 from game.difficulty import get_config, performance_score, update_difficulty
-from game.maze_generator import PELLET, POWER, WALL, generate_maze
+from game.maze_generator import PELLET, POWER, WALL, generate_maze, solve
 from game.pacman_env import PacmanEnv
 
 CELL_SIZE = 28
@@ -55,7 +57,7 @@ def main() -> int:
     env = create_environment(difficulty)
     current_action = "STAY"
     last_performance: float | None = None
-
+    win_streak = 0
     running = True
     while running:
         for event in pygame.event.get():
@@ -81,16 +83,22 @@ def main() -> int:
                     break
                 env.step("STAY", choose_ghost_actions(env, config.ghost_agent))
         else:
+            if env.won:
+                win_streak += 1
             last_performance = performance_score(
                 env.pellets_collected,
                 env.total_pellets,
                 env.steps,
                 env.max_steps,
+                env.traveled_steps,
+                env.generated_greedy_solution,
                 env.won,
+                win_streak,
             )
             difficulty = update_difficulty(difficulty, last_performance)
             env = create_environment(difficulty)
             current_action = "STAY"
+            
 
         draw(screen, font, env, difficulty, last_performance)
         pygame.display.flip()
@@ -99,27 +107,27 @@ def main() -> int:
     pygame.quit()
     return 0
 
-
 def create_environment(difficulty: int) -> PacmanEnv:
     config = get_config(difficulty)
     generated = generate_maze(GRID_WIDTH, GRID_HEIGHT, config)
+    generated_greedy_solution = solve(generated)
+    #print (f"Generated maze with difficulty {difficulty} ({config.ghost_agent} ghosts, {config.ghost_count} total, {config.power_pellets} power pellets, openness {config.maze_openness:.2f}, min start distance {config.min_start_distance}, ghost speed {config.ghost_speed}, spike count {config.spike_count}, frighten duration {config.frighten_duration}) - Greedy solution length: {generated_greedy_solution}")
     return PacmanEnv(
         generated.grid,
         generated.pacman_start,
         generated.ghost_starts,
         max_steps=GRID_WIDTH * GRID_HEIGHT * 2,
+        generated_greedy_solution=generated_greedy_solution,
     )
-
-
 
 def choose_ghost_actions(env: PacmanEnv, agent_name: str, difficulty: int) -> list[str]:
     actions = []
     for ghost_id in range(len(env.ghost_positions)):
         if agent_name == "mcts":
-            actions.append(ghost_mcts.choose_action(env, ghost_id, difficulty))
+            actions.append(ghost_mcts.choose_action(env, ghost_id))
         elif agent_name == "heuristic":
             # Pass the difficulty into the heuristic ghost!
-            actions.append(ghost_heuristic.choose_action(env, ghost_id, difficulty))
+            actions.append(ghost_heuristic.choose_action(env, ghost_id))
         else:
             actions.append(ghost_random.choose_action(env, ghost_id))
     return actions

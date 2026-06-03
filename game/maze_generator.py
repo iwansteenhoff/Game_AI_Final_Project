@@ -41,7 +41,7 @@ def generate_maze(
         open_cells = _walkable_cells(grid)
         if len(open_cells) < (width * height * 0.25):
             continue
-
+        
         pacman_start = _choose_pacman_start(open_cells)
         distances = bfs_distances(grid, pacman_start)
         ghost_starts = _choose_ghost_starts(
@@ -86,6 +86,85 @@ def shortest_path_distance(grid: list[list[str]], start: Position, goal: Positio
     distances = bfs_distances(grid, start)
     return distances.get(goal, 10_000)
 
+#---------------------SHORTEST CLEAR USING GREEDY STRATEGY WITH 2 OPT REFINEMENT------------------------------
+
+@staticmethod
+def solve(maze: GeneratedMaze) -> int:
+    '''
+    Solves the maze using a greedy strategy followed by 2-opt refinement.
+    Returns the total distance of the route that collects all pellets and power pellets.
+    This route's length is meant to be compared with the total amount of moves the player makes.
+    '''
+    ball_positions = [
+        (x, y)
+        for y, row in enumerate(maze.grid)
+        for x, tile in enumerate(row)
+        if tile in {PELLET, POWER}
+    ]
+
+    all_nodes = [maze.pacman_start] + ball_positions
+    matrix = {pos: bfs_distances(maze.grid, pos) for pos in all_nodes}
+
+    route = greedy_route(maze.pacman_start, ball_positions, matrix)
+    route = two_opt(maze.pacman_start, route, matrix)
+
+    return route_cost(maze.pacman_start, route, matrix)
+
+def greedy_route(pacman_start: Position, ball_positions: list[Position], matrix: dict[Position, dict[Position, int]]) -> list[Position]:
+    unvisited = set(ball_positions)
+    route = []
+    current = pacman_start
+
+    while unvisited:
+        nearest = min(unvisited, key=lambda pos: matrix[current][pos])
+        route.append(nearest)
+        unvisited.remove(nearest)
+        current = nearest
+
+    return route
+
+def route_cost(pacman_start: Position, route: list[Position], matrix: dict[Position, dict[Position, int]]) -> int:
+    if not route:
+        return 0
+    total = matrix[pacman_start][route[0]]
+    for i in range(len(route) - 1):
+        total += matrix[route[i]][route[i + 1]]
+    return total
+
+def two_opt_swap(route: list[Position], i: int, j: int) -> list[Position]:
+    return route[:i] + route[i:j+1][::-1] + route[j+1:]
+
+def two_opt_gain(pacman_start: Position, route: list[Position], i: int, j: int, matrix: dict[Position, dict[Position, int]]) -> int:
+    # Determine the node before index i
+    before_i = pacman_start if i == 0 else route[i - 1]
+    # Determine the node after index j
+    after_j = route[j + 1] if j + 1 < len(route) else None
+
+    old_cost = matrix[before_i][route[i]]
+    if after_j is not None:
+        old_cost += matrix[route[j]][after_j]
+
+    new_cost = matrix[before_i][route[j]]
+    if after_j is not None:
+        new_cost += matrix[route[i]][after_j]
+
+    return old_cost - new_cost  # positive means improvement
+
+def two_opt(pacman_start: Position, route: list[Position], matrix: dict[Position, dict[Position, int]]) -> list[Position]:
+    route = list(route)
+    improved = True
+
+    while improved:
+        improved = False
+        for i in range(len(route)):
+            for j in range(i + 1, len(route)):
+                if two_opt_gain(pacman_start, route, i, j, matrix) > 0:
+                    route = two_opt_swap(route, i, j)
+                    improved = True
+
+    return route
+
+#---------------------END OF SHORTEST CLEAR CODE---------------------------------------------------------
 
 def neighbors(grid: list[list[str]], pos: Position) -> list[Position]:
     x, y = pos
