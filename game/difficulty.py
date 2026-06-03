@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
+from typing import Deque
 
 
 @dataclass(frozen=True)
@@ -13,18 +15,38 @@ class DifficultyConfig:
     maze_openness: float
     min_start_distance: int
     ghost_speed: int = 1
-    spike_count: int = 0
-    frighten_duration: int = 20  # steps ghosts stay frightened
+    ghost_aggression: float = 1.0
+
+
+@dataclass(frozen=True)
+class RunMetrics:
+    difficulty_level: int
+    won: bool
+    steps_survived: int
+    max_steps: int
+    pellets_collected: int
+    total_pellets: int
+    power_pellets_collected: int
+    ghosts_eaten: int
+    deaths_to_ghost: int
+    maze_difficulty_score: float
+    ghost_agent_type: str
+    ghost_count: int
+    final_score: float
 
 
 DIFFICULTY_LEVELS: dict[int, DifficultyConfig] = {
-    0: DifficultyConfig("random",    1, 6, 0.58, 16, spike_count=0,  frighten_duration=30),
-    1: DifficultyConfig("random",    2, 5, 0.54, 14, spike_count=2,  frighten_duration=25),
-    2: DifficultyConfig("heuristic", 2, 4, 0.50, 12, spike_count=4,  frighten_duration=20),
-    3: DifficultyConfig("heuristic", 3, 3, 0.46, 10, spike_count=6,  frighten_duration=15),
-    4: DifficultyConfig("heuristic", 4, 2, 0.42,  8, spike_count=8,  frighten_duration=10),
-    5: DifficultyConfig("mcts",      4, 1, 0.38,  6, ghost_speed=2, spike_count=10, frighten_duration=7),
+    0: DifficultyConfig("random", 1, 6, 0.60, 18, ghost_aggression=0.0),
+    1: DifficultyConfig("random", 2, 5, 0.56, 16, ghost_aggression=0.0),
+    2: DifficultyConfig("heuristic", 2, 4, 0.53, 15, ghost_aggression=0.35),
+    3: DifficultyConfig("heuristic", 2, 3, 0.49, 13, ghost_aggression=0.60),
+    4: DifficultyConfig("heuristic", 3, 2, 0.45, 11, ghost_aggression=0.80),
+    5: DifficultyConfig("mcts", 3, 1, 0.41, 9, ghost_speed=2, ghost_aggression=0.85),
 }
+
+
+TARGET_LOW = 0.40
+TARGET_HIGH = 0.68
 
 
 def clamp_difficulty(level: int) -> int:
@@ -43,18 +65,73 @@ def performance_score(
     traveled_steps: int,
     generated_greedy_solution: int,
     won: bool,
+    power_pellets_collected: int = 0,
+    ghosts_eaten: int = 0,
     win_streak: int,
 ) -> float:
     pellet_completion = pellets_collected / max(1, total_pellets)
     survival_score = min(1.0, steps_survived / max(1, max_steps))
+    win_bonus = 1.0 if won else 0.0
+    efficiency = min(1.0, total_pellets / max(1, steps_survived)) if won else 0.0
+    ghost_interaction = min(1.0, (power_pellets_collected * 0.25) + (ghosts_eaten * 0.5))
     solution_score = min(1.0, generated_greedy_solution / max(1, traveled_steps))
-    win_factor = 1.0 if won else 0.0
-    return (0.5 * pellet_completion) + (0.3 * survival_score) + (win_factor * (0.2 + solution_score)) + (0.1 * win_streak)
+    return (
+        (0.55 * pellet_completion)
+        + (0.25 * win_bonus * solution_score)
+        + (0.10 * survival_score)
+        + (0.10 * max(efficiency, ghost_interaction))
+    )
 
 
 def update_difficulty(level: int, performance: float) -> int:
-    if performance > 0.75:
+    if performance > TARGET_HIGH:
         level += 1
-    elif performance < 0.35:
+    elif performance < TARGET_LOW:
         level -= 1
     return clamp_difficulty(level)
+
+
+class PlayerProfile:
+    def __init__(self, history_size: int = 5) -> None:
+        self.runs: Deque[RunMetrics] = deque(maxlen=history_size)
+
+    def add_run(self, metrics: RunMetrics) -> None:
+        self.runs.append(metrics)
+
+    @property
+    def recent_performance(self) -> float | None:
+        if not self.runs:
+            return None
+        weights = range(1, len(self.runs) + 1)
+        weighted_total = sum(run.final_score * weight for run, weight in zip(self.runs, weights))
+        return weighted_total / sum(weights)
+
+    @property
+    def latest_performance(self) -> float | None:
+        if not self.runs:
+            return None
+        return self.runs[-1].final_score
+
+    @property
+    def recent_win_rate(self) -> float | None:
+        if not self.runs:
+            return None
+        return sum(run.won for run in self.runs) / len(self.runs)
+
+    @property
+    def recent_pellet_completion(self) -> float | None:
+        if not self.runs:
+            return None
+        return sum(
+            run.pellets_collected / max(1, run.total_pellets)
+            for run in self.runs
+        ) / len(self.runs)
+
+    def recommended_difficulty(self, current_level: int) -> int:
+        recent = self.recent_performance
+        if recent is None:
+            return clamp_difficulty(current_level)
+        latest = self.latest_performance
+        if latest is not None and latest > TARGET_HIGH and recent > TARGET_LOW:
+            return clamp_difficulty(current_level + 1)
+        return update_difficulty(current_level, recent)

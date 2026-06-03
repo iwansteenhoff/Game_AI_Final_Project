@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import sys
 
 import pygame
@@ -7,8 +8,8 @@ import pygame
 from agents import ghost_heuristic, ghost_mcts, ghost_random
 
 import game
-from game.difficulty import get_config, performance_score, update_difficulty
-from game.maze_generator import PELLET, POWER, WALL, generate_maze, solve
+from game.difficulty import PlayerProfile, RunMetrics, get_config, performance_score
+from game.maze_generator import PELLET, POWER, WALL, generate_balanced_maze, solve
 from game.pacman_env import PacmanEnv
 
 CELL_SIZE = 28
@@ -42,21 +43,30 @@ KEY_TO_ACTION = {
     pygame.K_d: "RIGHT",
 }
 
+ACTION_KEYS = {
+    action: tuple(key for key, mapped_action in KEY_TO_ACTION.items() if mapped_action == action)
+    for action in set(KEY_TO_ACTION.values())
+}
+
 
 def main() -> int:
     pygame.init()
     pygame.display.set_caption("Adaptive Pacman-like Game AI")
 
     screen_width = GRID_WIDTH * CELL_SIZE
-    screen_height = GRID_HEIGHT * CELL_SIZE + 72
+    screen_height = GRID_HEIGHT * CELL_SIZE + 96
     screen = pygame.display.set_mode((screen_width, screen_height))
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("arial", 18)
 
-    difficulty = 4
+    difficulty = 2
+    profile = PlayerProfile(history_size=5)
     env = create_environment(difficulty)
     current_action = "STAY"
+    desired_action: str | None = None
     last_performance: float | None = None
+    last_win_rate: float | None = None
+    last_pellet_completion: float | None = None
     win_streak = 0
     running = True
     while running:
@@ -69,20 +79,38 @@ def main() -> int:
                 elif event.key == pygame.K_r:
                     env = create_environment(difficulty)
                     current_action = "STAY"
+                    desired_action = None
                 elif event.key in KEY_TO_ACTION:
-                    current_action = KEY_TO_ACTION[event.key]
+                    desired_action = KEY_TO_ACTION[event.key]
+            elif event.type == pygame.KEYUP and event.key in KEY_TO_ACTION:
+                released_action = KEY_TO_ACTION[event.key]
+                pressed = pygame.key.get_pressed()
+                if desired_action == released_action and not action_is_pressed(pressed, released_action):
+                    desired_action = None
 
         if not env.done:
             legal = env.legal_actions_for_pacman()
-            pacman_action = current_action if current_action in legal else "STAY"
+            pressed = pygame.key.get_pressed()
+            if desired_action is not None and not action_is_pressed(pressed, desired_action):
+                desired_action = None
+
+            if desired_action in legal:
+                pacman_action = desired_action
+            elif current_action in legal and action_is_pressed(pressed, current_action):
+                pacman_action = current_action
+            else:
+                pacman_action = "STAY"
+            current_action = pacman_action
+
             config = get_config(difficulty)
-            ghost_actions = choose_ghost_actions(env, config.ghost_agent, difficulty)
+            ghost_actions = choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression)
             env.step(pacman_action, ghost_actions)
             for _ in range(config.ghost_speed - 1):
                 if env.done:
                     break
-                env.step("STAY", choose_ghost_actions(env, config.ghost_agent))
+                env.step("STAY", choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression))
         else:
+            config = get_config(difficulty)
             if env.won:
                 win_streak += 1
             last_performance = performance_score(
@@ -94,13 +122,43 @@ def main() -> int:
                 env.generated_greedy_solution,
                 env.won,
                 win_streak,
+                env.power_pellets_collected,
+                env.ghosts_eaten,
             )
-            difficulty = update_difficulty(difficulty, last_performance)
+            profile.add_run(
+                RunMetrics(
+                    difficulty,
+                    env.won,
+                    env.steps,
+                    env.max_steps,
+                    env.pellets_collected,
+                    env.total_pellets,
+                    env.power_pellets_collected,
+                    env.ghosts_eaten,
+                    env.deaths_to_ghost,
+                    env.maze_difficulty_score,
+                    config.ghost_agent,
+                    len(env.ghost_positions),
+                    last_performance,
+                )
+            )
+            difficulty = profile.recommended_difficulty(difficulty)
+            last_win_rate = profile.recent_win_rate
+            last_pellet_completion = profile.recent_pellet_completion
             env = create_environment(difficulty)
             current_action = "STAY"
-            
+            desired_action = None
 
-        draw(screen, font, env, difficulty, last_performance)
+        draw(
+            screen,
+            font,
+            env,
+            difficulty,
+            last_performance,
+            profile.recent_performance,
+            last_win_rate,
+            last_pellet_completion,
+        )
         pygame.display.flip()
         clock.tick(FPS)
 
@@ -109,7 +167,7 @@ def main() -> int:
 
 def create_environment(difficulty: int) -> PacmanEnv:
     config = get_config(difficulty)
-    generated = generate_maze(GRID_WIDTH, GRID_HEIGHT, config)
+    generated = generate_balanced_maze(GRID_WIDTH, GRID_HEIGHT, config, difficulty)
     generated_greedy_solution = solve(generated)
     #print (f"Generated maze with difficulty {difficulty} ({config.ghost_agent} ghosts, {config.ghost_count} total, {config.power_pellets} power pellets, openness {config.maze_openness:.2f}, min start distance {config.min_start_distance}, ghost speed {config.ghost_speed}, spike count {config.spike_count}, frighten duration {config.frighten_duration}) - Greedy solution length: {generated_greedy_solution}")
     return PacmanEnv(
@@ -118,12 +176,20 @@ def create_environment(difficulty: int) -> PacmanEnv:
         generated.ghost_starts,
         max_steps=GRID_WIDTH * GRID_HEIGHT * 2,
         generated_greedy_solution=generated_greedy_solution,
+        maze_difficulty_score=generated.difficulty_score,
     )
 
-def choose_ghost_actions(env: PacmanEnv, agent_name: str, difficulty: int) -> list[str]:
+
+def action_is_pressed(pressed: pygame.key.ScancodeWrapper, action: str) -> bool:
+    return any(pressed[key] for key in ACTION_KEYS.get(action, ()))
+
+
+def choose_ghost_actions(env: PacmanEnv, agent_name: str, aggression: float) -> list[str]:
     actions = []
     for ghost_id in range(len(env.ghost_positions)):
-        if agent_name == "mcts":
+        if random.random() > aggression:
+            actions.append(ghost_random.choose_action(env, ghost_id))
+        elif agent_name == "mcts":
             actions.append(ghost_mcts.choose_action(env, ghost_id))
         elif agent_name == "heuristic":
             # Pass the difficulty into the heuristic ghost!
@@ -139,6 +205,9 @@ def draw(
     env: PacmanEnv,
     difficulty: int,
     last_performance: float | None,
+    recent_performance: float | None,
+    recent_win_rate: float | None,
+    recent_pellet_completion: float | None,
 ) -> None:
     screen.fill(BLACK)
 
@@ -180,13 +249,21 @@ def draw(
 
     score_text = (
         f"Difficulty: {difficulty} | Ghosts: {len(env.ghost_positions)} "
-        f"({config.ghost_agent}) | Pellets: {env.pellets_collected}/{env.total_pellets}"
+        f"({config.ghost_agent} {config.ghost_aggression:.0%}) | Maze: {env.maze_difficulty_score:.2f}"
     )
     screen.blit(font.render(score_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 10))
 
     perf = "n/a" if last_performance is None else f"{last_performance:.2f}"
-    help_text = f"Move: arrows/WASD | R: new maze | Last performance: {perf}"
-    screen.blit(font.render(help_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 38))
+    recent = "n/a" if recent_performance is None else f"{recent_performance:.2f}"
+    win_rate = "n/a" if recent_win_rate is None else f"{recent_win_rate:.0%}"
+    pellet_rate = "n/a" if recent_pellet_completion is None else f"{recent_pellet_completion:.0%}"
+    run_text = (
+        f"Pellets: {env.pellets_collected}/{env.total_pellets} | "
+        f"Power: {env.power_timer} | Ghosts eaten: {env.ghosts_eaten}"
+    )
+    profile_text = f"Last: {perf} | Recent: {recent} | Win: {win_rate} | Pellets: {pellet_rate}"
+    screen.blit(font.render(run_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 38))
+    screen.blit(font.render(profile_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 66))
 
 if __name__ == "__main__":
     raise SystemExit(main())
