@@ -169,7 +169,7 @@ def create_environment(difficulty: int) -> PacmanEnv:
     config = get_config(difficulty)
     generated = generate_balanced_maze(GRID_WIDTH, GRID_HEIGHT, config, difficulty)
     generated_greedy_solution = solve(generated)
-    #print (f"Generated maze with difficulty {difficulty} ({config.ghost_agent} ghosts, {config.ghost_count} total, {config.power_pellets} power pellets, openness {config.maze_openness:.2f}, min start distance {config.min_start_distance}, ghost speed {config.ghost_speed}, spike count {config.spike_count}, frighten duration {config.frighten_duration}) - Greedy solution length: {generated_greedy_solution}")
+    print(f"Greedy solution: {generated_greedy_solution}")
     return PacmanEnv(
         generated.grid,
         generated.pacman_start,

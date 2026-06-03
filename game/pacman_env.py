@@ -32,7 +32,6 @@ class PacmanEnv:
         ghost_starts: list[Position],
         max_steps: int = 700,
         maze_difficulty_score: float = 0.0,
-        frighten_duration: int = 20,
         generated_greedy_solution: int = 2**32,
     ) -> None:
         self.initial_grid = [row[:] for row in grid]
@@ -41,7 +40,6 @@ class PacmanEnv:
         self.ghost_starts = ghost_starts[:]
         self.max_steps = max_steps
         self.maze_difficulty_score = maze_difficulty_score
-        self.frighten_duration = frighten_duration
         self.generated_greedy_solution = generated_greedy_solution
         self.reset()
 
@@ -70,9 +68,6 @@ class PacmanEnv:
         self.steps += 1
         if self.power_timer > 0:
             self.power_timer -= 1
-
-        self.ghost_frighten_timers = [max(0, t - 1)
-                                      for t in self.ghost_frighten_timers]
 
         self.pacman_pos = self.next_position(self.pacman_pos, pacman_action)
         px, py = self.pacman_pos

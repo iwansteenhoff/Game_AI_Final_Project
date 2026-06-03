@@ -65,9 +65,9 @@ def performance_score(
     traveled_steps: int,
     generated_greedy_solution: int,
     won: bool,
+    win_streak: int,
     power_pellets_collected: int = 0,
     ghosts_eaten: int = 0,
-    win_streak: int,
 ) -> float:
     pellet_completion = pellets_collected / max(1, total_pellets)
     survival_score = min(1.0, steps_survived / max(1, max_steps))
