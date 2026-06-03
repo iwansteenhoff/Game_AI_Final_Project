@@ -55,14 +55,14 @@ class PacmanEnv:
         self.lost = False
         self.pellets_collected = 0
         self.power_pellets_collected = 0
-        self.ghosts_eaten = 0
+        self.ghosts_eaten = False
         self.deaths_to_ghost = 0
         self.power_timer = 0
         self.total_pellets = sum(tile in {PELLET, POWER} for row in self.grid for tile in row)
 
     def step(self, pacman_action: str, ghost_actions: list[str]) -> StepResult:
         if self.done:
-            return StepResult(self.won, self.lost, False, False)
+            return StepResult(self.won, self.lost, False, False, False)
         old_x, old_y = self.pacman_pos
         pellet_collected = False
         power_collected = False
@@ -79,7 +79,7 @@ class PacmanEnv:
 
         if self.grid[py][px] == SPIKE:
             self.lost = True
-            return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
+            return StepResult(False, True, pellet_collected, power_collected, ghost_eaten)
 
         if self.grid[py][px] in {PELLET, POWER}:
             power_collected = self.grid[py][px] == POWER
