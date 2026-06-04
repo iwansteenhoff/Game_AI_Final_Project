@@ -27,6 +27,8 @@ PELLET_COLOR = (246, 217, 139)
 POWER_COLOR = (126, 224, 170)
 PACMAN_YELLOW = (255, 213, 64)
 GHOST_RED = (234, 74, 91)
+GHOST_GREEN = (76, 217, 100)
+GHOST_ORANGE = (255, 149, 0)
 GHOST_FRIGHTENED = (58, 110, 220)
 GHOST_FLASH = (230, 230, 255)
 GHOST_RESPAWNING = (122, 128, 145)
@@ -189,7 +191,12 @@ def draw_ghost_at(gx, gy, screen, env, id=0):
         flash = ((frightened_timer // 15) % 2) == 0
         color = GHOST_FLASH if flash else GHOST_FRIGHTENED
     else:
-        color = GHOST_RED
+        if id == 0:
+            color = GHOST_GREEN
+        elif id == 1:
+            color = GHOST_ORANGE
+        else:
+            color = GHOST_RED
     ghost_rect = pygame.Rect(0, 0, CELL_SIZE - 10, CELL_SIZE - 10)
     ghost_rect.center = (int(gx), int(gy))
     pygame.draw.rect(screen, color, ghost_rect, border_radius=5)
