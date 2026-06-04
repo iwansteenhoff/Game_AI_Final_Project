@@ -1,4 +1,0 @@
-ghost_setting,episodes,win_rate,average_steps_until_end,average_pellet_completion,average_ghost_distance
-random,10,0.0,237.2,0.5932355670632714,12.011147540983606
-heuristic,10,0.0,43.7,0.13591037586908714,7.110244734175355
-mcts,10,0.0,63.1,0.18155947539979403,6.095142313326169
