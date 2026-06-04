@@ -66,7 +66,7 @@ def generate_maze(
             continue
         
         pacman_start = _choose_pacman_start(open_cells)
-        distances = bfs_distances(grid, pacman_start)
+        distances = bfs_wrap(grid, pacman_start)
         ghost_starts = _choose_ghost_starts(
             open_cells,
             distances,
@@ -146,7 +146,7 @@ def bfs_distances(grid: list[list[str]], start: Position) -> dict[Position, int]
 def shortest_path_distance(grid: list[list[str]], start: Position, goal: Position) -> int:
     if start == goal:
         return 0
-    distances = bfs_distances(grid, start)
+    distances = bfs_wrap(grid, start)
     return distances.get(goal, 10_000)
 
 #---------------------SHORTEST CLEAR USING GREEDY STRATEGY WITH 2 OPT REFINEMENT------------------------------
@@ -166,7 +166,7 @@ def solve(maze: GeneratedMaze) -> int:
     ]
 
     all_nodes = [maze.pacman_start] + ball_positions
-    matrix = {pos: bfs_distances(maze.grid, pos) for pos in all_nodes}
+    matrix = {pos: bfs_wrap(maze.grid, pos) for pos in all_nodes}
 
     route = greedy_route(maze.pacman_start, ball_positions, matrix)
     route = two_opt(maze.pacman_start, route, matrix)
@@ -342,7 +342,7 @@ def analyze_maze(
     ghost_starts: list[Position],
     config: DifficultyConfig,
 ) -> MazeAnalysis:
-    distances = bfs_distances(grid, pacman_start)
+    distances = bfs_wrap(grid, pacman_start)
     open_cells = _walkable_cells(grid)
     pellets = [
         (x, y)
@@ -709,7 +709,7 @@ def _estimate_collection_distance(
     total = 0
 
     while remaining:
-        distances = bfs_distances(grid, current)
+        distances = bfs_wrap(grid, current)
         nearest = min(remaining, key=lambda pellet: distances.get(pellet, 10_000))
         distance = distances.get(nearest, 10_000)
         if distance >= 10_000:
