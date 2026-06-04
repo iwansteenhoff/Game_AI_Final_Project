@@ -14,16 +14,16 @@ class DifficultyConfig:
     min_start_distance: int
     ghost_speed: int = 1
     spike_count: int = 0
-    frighten_duration: int = 20  # steps ghosts stay frightened
+    frighten_duration: int = 180  # frames ghosts stay frightened at 60 FPS
 
 
 DIFFICULTY_LEVELS: dict[int, DifficultyConfig] = {
-    0: DifficultyConfig("random",    1, 6, 0.58, 16, spike_count=0,  frighten_duration=30),
-    1: DifficultyConfig("random",    2, 5, 0.54, 14, spike_count=2,  frighten_duration=25),
-    2: DifficultyConfig("heuristic", 2, 4, 0.50, 12, spike_count=4,  frighten_duration=20),
-    3: DifficultyConfig("heuristic", 3, 3, 0.46, 10, spike_count=6,  frighten_duration=15),
-    4: DifficultyConfig("heuristic", 4, 2, 0.42,  8, spike_count=8,  frighten_duration=10),
-    5: DifficultyConfig("mcts",      4, 1, 0.38,  6, ghost_speed=2, spike_count=10, frighten_duration=7),
+    0: DifficultyConfig("random",    1, 6, 0.58, 0, spike_count=0,  frighten_duration=240),
+    1: DifficultyConfig("random",    2, 5, 0.54, 14, spike_count=2,  frighten_duration=210),
+    2: DifficultyConfig("heuristic", 2, 4, 0.50, 12, spike_count=4,  frighten_duration=180),
+    3: DifficultyConfig("heuristic", 3, 3, 0.46, 10, spike_count=6,  frighten_duration=150),
+    4: DifficultyConfig("heuristic", 4, 2, 0.42,  8, spike_count=8,  frighten_duration=120),
+    5: DifficultyConfig("mcts",      4, 1, 0.38,  6, ghost_speed=2, spike_count=10, frighten_duration=90),
 }
 
 
