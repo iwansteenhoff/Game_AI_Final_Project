@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import random
+import sys
 
 import sys
 import pygame
 import math
 from agents import ghost_heuristic, ghost_mcts, ghost_random
-from game.difficulty import get_config, performance_score, update_difficulty
-from game.maze_generator import PELLET, POWER, SPIKE, WALL, generate_maze
+
+import game
+from game.difficulty import PlayerProfile, RunMetrics, get_config, performance_score
+from game.maze_generator import PELLET, POWER, WALL, generate_balanced_maze, solve
 from game.pacman_env import PacmanEnv
 
 
@@ -26,12 +30,17 @@ PATH = (16, 19, 31)
 PELLET_COLOR = (246, 217, 139)
 POWER_COLOR = (126, 224, 170)
 PACMAN_YELLOW = (255, 213, 64)
-GHOST_RED = (234, 74, 91)
 GHOST_FRIGHTENED = (58, 110, 220)
 GHOST_FLASH = (230, 230, 255)
 GHOST_RESPAWNING = (122, 128, 145)
 RESPAWN_OUTLINE = (255, 105, 180)
 SPIKE_COLOR = (255, 100, 40)
+TEXT = (238, 242, 255)
+PACMAN_YELLOW = (255, 213, 64)
+GHOST_RED = (234, 74, 91)
+# Add these two new colors:
+GHOST_GREEN = (76, 217, 100)
+GHOST_ORANGE = (255, 149, 0)
 TEXT = (238, 242, 255)
 
 KEY_TO_ACTION = {
@@ -45,20 +54,25 @@ KEY_TO_ACTION = {
     pygame.K_d: "RIGHT",
 }
 
+ACTION_KEYS = {
+    action: tuple(key for key, mapped_action in KEY_TO_ACTION.items() if mapped_action == action)
+    for action in set(KEY_TO_ACTION.values())
+}
+
 
 def main() -> int:
     pygame.init()
     pygame.display.set_caption("Adaptive Pacman-like Game AI")
 
     screen_width = GRID_WIDTH * CELL_SIZE
-    screen_height = GRID_HEIGHT * CELL_SIZE + 72
+    screen_height = GRID_HEIGHT * CELL_SIZE + 96
     screen = pygame.display.set_mode((screen_width, screen_height))
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("arial", 18)
 
-    difficulty = 2
+    difficulty = 1
+    profile = PlayerProfile(history_size=5)
     env = create_environment(difficulty)
-    last_performance: float | None = None
 
     #  Smooth movement state 
     pacman_pixel_pos = [env.pacman_pos[0] * CELL_SIZE + CELL_SIZE // 2, env.pacman_pos[1] * CELL_SIZE + CELL_SIZE // 2]
@@ -68,6 +82,12 @@ def main() -> int:
         for gx, gy in env.ghost_positions
     ]
 
+    current_action = "STAY"
+    desired_action: str | None = None
+    last_performance: float | None = None
+    last_win_rate: float | None = None
+    last_pellet_completion: float | None = None
+    win_streak = 0
     running = True
     while running:
         for event in pygame.event.get():
@@ -84,7 +104,7 @@ def main() -> int:
 
         if not env.done:
             config = get_config(difficulty)
-            ghost_actions = choose_ghost_actions(env, config.ghost_agent)
+            ghost_actions = choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression)
             env.step(pacman_next_dir, ghost_actions)
 
             pacman_pixel_pos = env.pacman_pixel_pos[:]
@@ -92,48 +112,99 @@ def main() -> int:
             ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
 
         else:
+            config = get_config(difficulty)
+            if env.won:
+                win_streak += 1
             last_performance = performance_score(
                 env.pellets_collected,
                 env.total_pellets,
                 env.steps,
                 env.max_steps,
+                env.traveled_steps,
+                env.generated_greedy_solution,
                 env.won,
+                win_streak,
+                env.power_pellets_collected,
+                env.ghosts_eaten,
             )
-            difficulty = update_difficulty(difficulty, last_performance)
+            profile.add_run(
+                RunMetrics(
+                    difficulty,
+                    env.won,
+                    env.steps,
+                    env.max_steps,
+                    env.pellets_collected,
+                    env.total_pellets,
+                    env.power_pellets_collected,
+                    env.ghosts_eaten,
+                    env.deaths_to_ghost,
+                    env.maze_difficulty_score,
+                    config.ghost_agent,
+                    len(env.ghost_positions),
+                    last_performance,
+                )
+            )
+            difficulty = profile.recommended_difficulty(difficulty)
+            last_win_rate = profile.recent_win_rate
+            last_pellet_completion = profile.recent_pellet_completion
             env = create_environment(difficulty)
             pacman_next_dir = "STAY"
             pacman_pixel_pos = env.pacman_pixel_pos[:]
             ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
 
         #  Drawing 
-        draw_smooth(screen, font, env, difficulty, last_performance, pacman_pixel_pos, ghost_pixel_pos)
+        draw_smooth(
+            screen,
+            font,
+            env,
+            difficulty,
+            last_performance,
+            pacman_pixel_pos, 
+            ghost_pixel_pos,
+            profile.recent_performance,
+            last_win_rate,
+            last_pellet_completion,
+        )
+        
         pygame.display.flip()
         clock.tick(FPS)
 
     pygame.quit()
     return 0
 
-
 def create_environment(difficulty: int) -> PacmanEnv:
     config = get_config(difficulty)
-    generated = generate_maze(GRID_WIDTH, GRID_HEIGHT, config)
+    generated = generate_balanced_maze(GRID_WIDTH, GRID_HEIGHT, config, difficulty)
+    generated_greedy_solution = solve(generated)
+    print(f"Greedy solution: {generated_greedy_solution}")
     return PacmanEnv(
         generated.grid,
         generated.pacman_start,
         generated.ghost_starts,
+      
         generated.ghost_respawn_location,
         max_steps=GRID_WIDTH * GRID_HEIGHT * 20,
         frighten_duration=config.frighten_duration,
         move_speed=PACMAN_SPEED,
+      
+        generated_greedy_solution=generated_greedy_solution,
+        maze_difficulty_score=generated.difficulty_score,
     )
 
 
-def choose_ghost_actions(env: PacmanEnv, agent_name: str) -> list[str]:
+def action_is_pressed(pressed: pygame.key.ScancodeWrapper, action: str) -> bool:
+    return any(pressed[key] for key in ACTION_KEYS.get(action, ()))
+
+
+def choose_ghost_actions(env: PacmanEnv, agent_name: str, aggression: float) -> list[str]:
     actions = []
     for ghost_id in range(len(env.ghost_positions)):
-        if agent_name == "mcts":
+        if random.random() > aggression:
+            actions.append(ghost_random.choose_action(env, ghost_id))
+        elif agent_name == "mcts":
             actions.append(ghost_mcts.choose_action(env, ghost_id))
         elif agent_name == "heuristic":
+            # Pass the difficulty into the heuristic ghost!
             actions.append(ghost_heuristic.choose_action(env, ghost_id))
         else:
             actions.append(ghost_random.choose_action(env, ghost_id))
@@ -210,6 +281,9 @@ def draw_smooth(
     last_performance: float | None,
     pacman_pixel_pos: list[float],
     ghost_pixel_pos: list[list[float]],
+    recent_performance: float | None,
+    recent_win_rate: float | None,
+    recent_pellet_completion: float | None,
 ) -> None:
     screen.fill(BLACK)
 
@@ -223,18 +297,6 @@ def draw_smooth(
                 pygame.draw.circle(screen, PELLET_COLOR, center, 3)
             elif tile == POWER:
                 pygame.draw.circle(screen, POWER_COLOR, center, 7)
-            elif tile == SPIKE:
-                # Draw three upward-pointing triangles (spike cluster)
-                cx, cy = center
-                pad = CELL_SIZE // 2 - 4
-                tip_y = cy - pad
-                base_y = cy + pad - 2
-                half_w = pad - 1
-                pygame.draw.polygon(
-                    screen,
-                    SPIKE_COLOR,
-                    [(cx, tip_y), (cx - half_w, base_y), (cx + half_w, base_y)],
-                )
 
     respawn_rect = pygame.Rect(
         env.ghost_respawn_location[0] * CELL_SIZE,
@@ -255,17 +317,23 @@ def draw_smooth(
     for i, (gx, gy) in enumerate(ghost_pixel_pos):
         draw_ghost_at(gx, gy, screen, env, id=i)
 
-    config = get_config(difficulty)
     score_text = (
         f"Difficulty: {difficulty} | Ghosts: {len(env.ghost_positions)} "
-        f"({config.ghost_agent}) | Pellets: {env.pellets_collected}/{env.total_pellets}"
+        f"({config.ghost_agent} {config.ghost_aggression:.0%}) | Maze: {env.maze_difficulty_score:.2f}"
     )
     screen.blit(font.render(score_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 10))
 
     perf = "n/a" if last_performance is None else f"{last_performance:.2f}"
-    help_text = f"Move: arrows/WASD | R: new maze | Last performance: {perf}"
-    screen.blit(font.render(help_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 38))
-
+    recent = "n/a" if recent_performance is None else f"{recent_performance:.2f}"
+    win_rate = "n/a" if recent_win_rate is None else f"{recent_win_rate:.0%}"
+    pellet_rate = "n/a" if recent_pellet_completion is None else f"{recent_pellet_completion:.0%}"
+    run_text = (
+        f"Pellets: {env.pellets_collected}/{env.total_pellets} | "
+        f"Power: {env.power_timer} | Ghosts eaten: {env.ghosts_eaten}"
+    )
+    profile_text = f"Last: {perf} | Recent: {recent} | Win: {win_rate} | Pellets: {pellet_rate}"
+    screen.blit(font.render(run_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 38))
+    screen.blit(font.render(profile_text, True, TEXT), (12, GRID_HEIGHT * CELL_SIZE + 66))
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -21,7 +21,7 @@ class StepResult:
     lost: bool
     pellet_collected: bool
     power_collected: bool
-    ghosts_eaten: int = 0
+    ghost_eaten: bool = False
 
 
 @dataclass
@@ -51,8 +51,11 @@ class PacmanEnv:
         ghost_respawn_delay: int = 45,
         move_speed: float = 0.1,
         cell_size: int = 28,  # For pixel calculations
+        maze_difficulty_score: float = 0.0,
+        generated_greedy_solution: int = 2**32,
     ) -> None:
-        self.grid = [row[:] for row in grid]
+        self.initial_grid = [row[:] for row in grid]
+        self.grid = [row[:] for row in self.initial_grid]
         self.pacman_start = pacman_start
         self.ghost_starts = ghost_starts[:]
         self.ghost_respawn_location = ghost_respawn_location
@@ -78,12 +81,16 @@ class PacmanEnv:
         self.ghost_pixel_pos: list[list[float]] = []
         self.pacman_dir = "STAY"
         self.pacman_next_dir = "STAY"
+        self.maze_difficulty_score = maze_difficulty_score
+        self.generated_greedy_solution = generated_greedy_solution
         self.reset()
 
     def reset(self) -> None:
+        self.grid = [row[:] for row in self.initial_grid]
         self.pacman_pos = self.pacman_start
         self.ghost_positions = self.ghost_starts[:]
         self.steps = 0
+        self.traveled_steps = 0
         self.won = False
         self.lost = False
         self.pellets_collected = 0
@@ -218,26 +225,33 @@ class PacmanEnv:
     @property
     def frightened_ghosts(self) -> set[int]:
         return {i for i, t in enumerate(self.ghost_frighten_timers) if t > 0}
+        self.power_pellets_collected = 0
+        self.ghosts_eaten = 0
+        self.deaths_to_ghost = 0
+        self.power_timer = 0
+        self.total_pellets = sum(tile in {PELLET, POWER} for row in self.grid for tile in row)
 
     def step(self, pacman_action: str, ghost_actions: list[str]) -> StepResult:
         if self.done:
-            return StepResult(self.won, self.lost, False, False)
-
+            return StepResult(self.won, self.lost, False, False, False)
+        old_x, old_y = self.pacman_pos
         pellet_collected = False
         power_collected = False
-        ghosts_eaten = 0
+        ghost_eaten = False
         self.steps += 1
 
         self.pacman_next_dir = pacman_action
         self.move_pacman_smooth(self.move_speed)
         self.move_ghosts_smooth(ghost_actions, self.move_speed)
         self.ghost_frighten_timers = [max(0, t - 1) for t in self.ghost_frighten_timers]
+        if self.power_timer > 0:
+            self.power_timer -= 1
 
         px, py = self.pacman_pos
 
         if self.grid[py][px] == SPIKE:
             self.lost = True
-            return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
+            return StepResult(False, True, pellet_collected, power_collected, ghost_eaten)
 
         if self.grid[py][px] in {PELLET, POWER}:
             power_collected = self.grid[py][px] == POWER
@@ -245,19 +259,30 @@ class PacmanEnv:
             self.grid[py][px] = " "
             self.pellets_collected += 1
             if power_collected:
-                self.ghost_frighten_timers = [
-                    self.frighten_duration if pos is not None else 0
-                    for pos in self.ghost_positions
-                ]
+                self.power_pellets_collected += 1
+                self.power_timer = 30
 
-        ghosts_eaten += self._resolve_pacman_ghost_collisions()
+        ghost_eaten = self._resolve_ghost_collision()
         if self.lost:
-            return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
+            self.deaths_to_ghost += 1
+            return StepResult(False, True, pellet_collected, power_collected, ghost_eaten)
 
         if self.pellets_collected >= self.total_pellets:
+        for index, action in enumerate(ghost_actions):
+            if index < len(self.ghost_positions):
+                self.ghost_positions[index] = self.next_position(
+                    self.ghost_positions[index], action
+                )
+
+        ghost_eaten = self._resolve_ghost_collision() or ghost_eaten
+        if self.lost:
+            self.deaths_to_ghost += 1
+        elif self.pellets_collected >= self.total_pellets:
             self.won = True
         elif self.steps >= self.max_steps:
             self.lost = True
+        if (old_x, old_y) != self.pacman_pos:
+            self.traveled_steps += 1
 
         return StepResult(self.won, self.lost, pellet_collected, power_collected, ghosts_eaten)
 
@@ -276,6 +301,7 @@ class PacmanEnv:
                     return eaten
 
         return eaten
+        return StepResult(self.won, self.lost, pellet_collected, power_collected, ghost_eaten)
 
     def _send_ghost_home(self, ghost_id: int) -> None:
         state = self.ghost_states[ghost_id]
@@ -336,6 +362,7 @@ class PacmanEnv:
         ny = (pos[1] + dy) % height
         if self.grid[ny][nx] == WALL and not (allow_respawn_tile and (nx, ny) == self.ghost_respawn_location):
             return pos
+        ###### TODO: Keep track of total steps in current level
         return nx, ny
 
     def shortest_path_distance(self, start: Position, goal: Position) -> int:
@@ -370,3 +397,23 @@ class PacmanEnv:
                 queue.append(next_pos)
 
         return 10_000
+
+    @property
+    def powered(self) -> bool:
+        return self.power_timer > 0
+
+    def _resolve_ghost_collision(self) -> bool:
+        if self.pacman_pos not in self.ghost_positions:
+            return False
+
+        if not self.powered:
+            self.lost = True
+            return False
+
+        eaten_any = False
+        for index, ghost_pos in enumerate(self.ghost_positions):
+            if ghost_pos == self.pacman_pos:
+                self.ghost_positions[index] = self.ghost_starts[index]
+                self.ghosts_eaten += 1
+                eaten_any = True
+        return eaten_any
