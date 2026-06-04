@@ -66,7 +66,7 @@ def generate_maze(
             continue
         
         pacman_start = _choose_pacman_start(open_cells)
-        distances = bfs_distances(grid, pacman_start)
+        distances = bfs_wrap(grid, pacman_start)
         ghost_starts = _choose_ghost_starts(
             open_cells,
             distances,
@@ -146,7 +146,7 @@ def bfs_distances(grid: list[list[str]], start: Position) -> dict[Position, int]
 def shortest_path_distance(grid: list[list[str]], start: Position, goal: Position) -> int:
     if start == goal:
         return 0
-    distances = bfs_distances(grid, start)
+    distances = bfs_wrap(grid, start)
     return distances.get(goal, 10_000)
 
 #---------------------SHORTEST CLEAR USING GREEDY STRATEGY WITH 2 OPT REFINEMENT------------------------------
@@ -166,7 +166,7 @@ def solve(maze: GeneratedMaze) -> int:
     ]
 
     all_nodes = [maze.pacman_start] + ball_positions
-    matrix = {pos: bfs_distances(maze.grid, pos) for pos in all_nodes}
+    matrix = {pos: bfs_wrap(maze.grid, pos) for pos in all_nodes}
 
     route = greedy_route(maze.pacman_start, ball_positions, matrix)
     route = two_opt(maze.pacman_start, route, matrix)
@@ -286,7 +286,7 @@ def is_valid_maze(
     distances = bfs_wrap(grid, pacman_start)
     open_cells = _walkable_cells(grid)
 
-    # Ensure all open cells are reachable from the start without wrap-around
+    # Ensure all open cells are reachable from the start with gameplay wrap-around
     if any(cell not in distances for cell in open_cells):
         print("Validation failed: Not all open cells are reachable from the start.")
         return False
@@ -342,7 +342,7 @@ def analyze_maze(
     ghost_starts: list[Position],
     config: DifficultyConfig,
 ) -> MazeAnalysis:
-    distances = bfs_distances(grid, pacman_start)
+    distances = bfs_wrap(grid, pacman_start)
     open_cells = _walkable_cells(grid)
     pellets = [
         (x, y)
@@ -353,7 +353,7 @@ def analyze_maze(
     connected = all(cell in distances for cell in open_cells)
     all_pellets_reachable = all(pellet in distances for pellet in pellets)
 
-    branch_counts = [len(neighbors(grid, cell)) for cell in open_cells]
+    branch_counts = [len(wrap_neighbors(grid, cell)) for cell in open_cells]
     dead_ends = sum(1 for count in branch_counts if count == 1)
     junction_count = sum(1 for count in branch_counts if count >= 3)
     dead_end_ratio = dead_ends / max(1, len(open_cells))
@@ -670,7 +670,7 @@ def _make_odd(value: int) -> int:
 
 
 def _average_corridor_length(grid: list[list[str]], open_cells: list[Position]) -> float:
-    corridor_cells = [cell for cell in open_cells if len(neighbors(grid, cell)) == 2]
+    corridor_cells = [cell for cell in open_cells if len(wrap_neighbors(grid, cell)) == 2]
     if not corridor_cells:
         return 0.0
     visited: set[Position] = set()
@@ -684,11 +684,11 @@ def _average_corridor_length(grid: list[list[str]], open_cells: list[Position]) 
         stack = [start]
         while stack:
             cell = stack.pop()
-            if cell in visited or len(neighbors(grid, cell)) != 2:
+            if cell in visited or len(wrap_neighbors(grid, cell)) != 2:
                 continue
             visited.add(cell)
             length += 1
-            stack.extend(neighbor for neighbor in neighbors(grid, cell) if neighbor not in visited)
+            stack.extend(neighbor for neighbor in wrap_neighbors(grid, cell) if neighbor not in visited)
 
         if length:
             lengths.append(length)
@@ -709,7 +709,7 @@ def _estimate_collection_distance(
     total = 0
 
     while remaining:
-        distances = bfs_distances(grid, current)
+        distances = bfs_wrap(grid, current)
         nearest = min(remaining, key=lambda pellet: distances.get(pellet, 10_000))
         distance = distances.get(nearest, 10_000)
         if distance >= 10_000:
