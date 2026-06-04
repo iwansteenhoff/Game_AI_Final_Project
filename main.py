@@ -102,7 +102,7 @@ def main() -> int:
 
         if not env.done:
             config = get_config(difficulty)
-            ghost_actions = choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression)
+            ghost_actions = choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression, difficulty)
             env.step(pacman_next_dir, ghost_actions)
 
             pacman_pixel_pos = env.pacman_pixel_pos[:]
@@ -194,16 +194,16 @@ def action_is_pressed(pressed: pygame.key.ScancodeWrapper, action: str) -> bool:
     return any(pressed[key] for key in ACTION_KEYS.get(action, ()))
 
 
-def choose_ghost_actions(env: PacmanEnv, agent_name: str, aggression: float) -> list[str]:
+def choose_ghost_actions(env: PacmanEnv, agent_name: str, aggression: float, difficulty: int) -> list[str]:
     actions = []
     for ghost_id in range(len(env.ghost_positions)):
         if random.random() > aggression:
             actions.append(ghost_random.choose_action(env, ghost_id))
         elif agent_name == "mcts":
-            actions.append(ghost_mcts.choose_action(env, ghost_id))
+            actions.append(ghost_mcts.choose_action(env, ghost_id, difficulty))
         elif agent_name == "heuristic":
             # Pass the difficulty into the heuristic ghost!
-            actions.append(ghost_heuristic.choose_action(env, ghost_id))
+            actions.append(ghost_heuristic.choose_action(env, ghost_id, difficulty))
         else:
             actions.append(ghost_random.choose_action(env, ghost_id))
     return actions
@@ -248,7 +248,7 @@ def draw_pacman_at(px, py, screen, env, id=0):
 
     pygame.draw.polygon(screen, PATH, [p1, p2, p3])
 
-def draw_ghost_at(gx, gy, screen, env, id=0):
+def draw_ghost_at(gx, gy, screen, env, config, id=0):
     respawn_timer = env.ghost_respawn_timers[id] if id < len(env.ghost_respawn_timers) else 0
     frightened_timer = env.ghost_frighten_timers[id] if id < len(env.ghost_frighten_timers) else 0
 
@@ -258,7 +258,13 @@ def draw_ghost_at(gx, gy, screen, env, id=0):
         flash = ((frightened_timer // 15) % 2) == 0
         color = GHOST_FLASH if flash else GHOST_FRIGHTENED
     else:
-        color = GHOST_RED
+        if config.ghost_agent == "random":
+            color = GHOST_GREEN
+        elif config.ghost_agent == "heuristic":
+            color = GHOST_ORANGE
+        else:
+            color = GHOST_RED
+            
     ghost_rect = pygame.Rect(0, 0, CELL_SIZE - 10, CELL_SIZE - 10)
     ghost_rect.center = (int(gx), int(gy))
     pygame.draw.rect(screen, color, ghost_rect, border_radius=5)
@@ -313,9 +319,10 @@ def draw_smooth(
     draw_pacman_at(px, py, screen, env)
     
 
+     
     #  Ghosts (simple animation: eyes) 
     for i, (gx, gy) in enumerate(ghost_pixel_pos):
-        draw_ghost_at(gx, gy, screen, env, id=i)
+        draw_ghost_at(gx, gy, screen, env, config, id=i)
 
     score_text = (
         f"Difficulty: {difficulty} | Ghosts: {len(env.ghost_positions)} "
