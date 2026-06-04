@@ -1,5 +1,6 @@
 """Adaptive difficulty configuration for generated Pacman-like games."""
 
+
 from __future__ import annotations
 
 from collections import deque
@@ -38,16 +39,16 @@ class RunMetrics:
 
 
 DIFFICULTY_LEVELS: dict[int, DifficultyConfig] = {
-    0: DifficultyConfig("random", 1, 9, 0.66, 24, spike_count=0,  frighten_duration=240, ghost_aggression=0.0),
-    1: DifficultyConfig("random", 1, 8, 0.63, 22, spike_count=2,  frighten_duration=210, ghost_aggression=0.0),
-    2: DifficultyConfig("heuristic", 1, 7, 0.60, 20, spike_count=4,  frighten_duration=180, ghost_aggression=0.08),
-    3: DifficultyConfig("heuristic", 2, 6, 0.57, 18, spike_count=6,  frighten_duration=150, ghost_aggression=0.18),
-    4: DifficultyConfig("heuristic", 2, 5, 0.54, 16, spike_count=8,  frighten_duration=120, ghost_aggression=0.32),
-    5: DifficultyConfig("mcts", 2, 4, 0.50, 14, ghost_speed=1, spike_count=10, frighten_duration=90, ghost_aggression=0.45),
+    0: DifficultyConfig("random",    1, 6, 0.58, 0, spike_count=0,  frighten_duration=240, ghost_aggression=0.0),
+    1: DifficultyConfig("random",    2, 5, 0.54, 14, spike_count=2,  frighten_duration=210, ghost_aggression=0.0),
+    2: DifficultyConfig("heuristic", 2, 4, 0.50, 12, spike_count=4,  frighten_duration=180, ghost_aggression=0.35),
+    3: DifficultyConfig("heuristic", 3, 3, 0.46, 10, spike_count=6,  frighten_duration=150, ghost_aggression=0.60),
+    4: DifficultyConfig("heuristic", 4, 2, 0.42,  8, spike_count=8,  frighten_duration=120, ghost_aggression=0.80),
+    5: DifficultyConfig("mcts",      4, 1, 0.38,  6, ghost_speed=2, spike_count=10, frighten_duration=90, ghost_aggression=0.85),
 }
 
-TARGET_LOW = 0.45
-TARGET_HIGH = 0.75
+TARGET_LOW = 0.40
+TARGET_HIGH = 0.68
 
 
 def clamp_difficulty(level: int) -> int:
@@ -72,10 +73,13 @@ def performance_score(
 ) -> float:
     pellet_completion = pellets_collected / max(1, total_pellets)
     survival_score = min(1.0, steps_survived / max(1, max_steps))
+    solution_score = min(1.0, generated_greedy_solution /
+                         max(1, traveled_steps))
+    efficiency = min(1.0, total_pellets /
+                     max(1, steps_survived)) if won else 0.0
+    ghost_interaction = min(
+        1.0, (power_pellets_collected * 0.25) + (ghosts_eaten * 0.5))
     win_bonus = 1.0 if won else 0.0
-    efficiency = min(1.0, total_pellets / max(1, steps_survived)) if won else 0.0
-    ghost_interaction = min(1.0, (power_pellets_collected * 0.25) + (ghosts_eaten * 0.5))
-    solution_score = min(1.0, generated_greedy_solution / max(1, traveled_steps))
     return (
         (0.55 * pellet_completion)
         + (0.25 * win_bonus * solution_score)
@@ -104,7 +108,8 @@ class PlayerProfile:
         if not self.runs:
             return None
         weights = range(1, len(self.runs) + 1)
-        weighted_total = sum(run.final_score * weight for run, weight in zip(self.runs, weights))
+        weighted_total = sum(run.final_score * weight for run,
+                             weight in zip(self.runs, weights))
         return weighted_total / sum(weights)
 
     @property

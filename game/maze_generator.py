@@ -50,21 +50,20 @@ def generate_maze(
     width = _make_odd(max(11, width))
     height = _make_odd(max(11, height))
 
-
     for _ in range(max_attempts):
         grid = _create_wall_grid(width, height)
         _carve_depth_first_maze(grid)
         _open_extra_cells(grid, config.maze_openness)
-        
+
         _apply_wrap_portals(grid, max_pairs=3)
 
         if not _has_enough_walls(grid):
             continue
-        
+
         open_cells = _walkable_cells(grid)
         if len(open_cells) < (width * height * 0.25):
             continue
-        
+
         pacman_start = _choose_pacman_start(open_cells)
         distances = bfs_wrap(grid, pacman_start)
         ghost_starts = _choose_ghost_starts(
@@ -111,7 +110,8 @@ def generate_balanced_maze(
 
     for _ in range(max(1, candidates)):
         maze = generate_maze(width, height, config)
-        analysis = analyze_maze(maze.grid, maze.pacman_start, maze.ghost_starts, config)
+        analysis = analyze_maze(
+            maze.grid, maze.pacman_start, maze.ghost_starts, config)
         target_score = float(target_difficulty)
         distance = abs(analysis.difficulty_score - target_score)
 
@@ -130,7 +130,62 @@ def generate_balanced_maze(
     return best_maze
 
 
-def bfs_distances(grid: list[list[str]], start: Position) -> dict[Position, int]:
+def analyze_maze(
+    grid: list[list[str]],
+    pacman_start: Position,
+    ghost_starts: list[Position],
+    config: DifficultyConfig,
+) -> MazeAnalysis:
+    distances = bfs_wrap(grid, pacman_start)
+    open_cells = _walkable_cells(grid)
+    pellets = [
+        (x, y)
+        for y, row in enumerate(grid)
+        for x, tile in enumerate(row)
+        if tile in {PELLET, POWER}
+    ]
+    connected = all(cell in distances for cell in open_cells)
+    all_pellets_reachable = all(pellet in distances for pellet in pellets)
+
+    branch_counts = [len(wrap_neighbors(grid, cell)) for cell in open_cells]
+    dead_ends = sum(1 for count in branch_counts if count == 1)
+    junction_count = sum(1 for count in branch_counts if count >= 3)
+    dead_end_ratio = dead_ends / max(1, len(open_cells))
+    average_branching_factor = sum(branch_counts) / max(1, len(branch_counts))
+    average_corridor_length = _average_corridor_length(grid, open_cells)
+    nearest_ghost_distance = min(
+        (distances.get(ghost, 10_000) for ghost in ghost_starts),
+        default=10_000,
+    )
+    estimated_collection_distance = _estimate_collection_distance(
+        grid, pacman_start, pellets)
+
+    score = _maze_difficulty_score(
+        config,
+        dead_end_ratio,
+        average_branching_factor,
+        average_corridor_length,
+        nearest_ghost_distance,
+        estimated_collection_distance,
+        len(pellets),
+    )
+
+    return MazeAnalysis(
+        connected,
+        all_pellets_reachable,
+        len(open_cells),
+        len(pellets),
+        dead_end_ratio,
+        junction_count,
+        average_branching_factor,
+        average_corridor_length,
+        nearest_ghost_distance,
+        estimated_collection_distance,
+        score,
+    )
+
+
+def bfs_wrap(grid: list[list[str]], start: Position) -> dict[Position, int]:
     queue: deque[Position] = deque([start])
     distances = {start: 0}
 
@@ -143,13 +198,15 @@ def bfs_distances(grid: list[list[str]], start: Position) -> dict[Position, int]
 
     return distances
 
+
 def shortest_path_distance(grid: list[list[str]], start: Position, goal: Position) -> int:
     if start == goal:
         return 0
     distances = bfs_wrap(grid, start)
     return distances.get(goal, 10_000)
 
-#---------------------SHORTEST CLEAR USING GREEDY STRATEGY WITH 2 OPT REFINEMENT------------------------------
+# ---------------------SHORTEST CLEAR USING GREEDY STRATEGY WITH 2 OPT REFINEMENT------------------------------
+
 
 @staticmethod
 def solve(maze: GeneratedMaze) -> int:
@@ -173,6 +230,7 @@ def solve(maze: GeneratedMaze) -> int:
 
     return route_cost(maze.pacman_start, route, matrix)
 
+
 def greedy_route(pacman_start: Position, ball_positions: list[Position], matrix: dict[Position, dict[Position, int]]) -> list[Position]:
     unvisited = set(ball_positions)
     route = []
@@ -186,6 +244,7 @@ def greedy_route(pacman_start: Position, ball_positions: list[Position], matrix:
 
     return route
 
+
 def route_cost(pacman_start: Position, route: list[Position], matrix: dict[Position, dict[Position, int]]) -> int:
     if not route:
         return 0
@@ -194,8 +253,10 @@ def route_cost(pacman_start: Position, route: list[Position], matrix: dict[Posit
         total += matrix[route[i]][route[i + 1]]
     return total
 
+
 def two_opt_swap(route: list[Position], i: int, j: int) -> list[Position]:
     return route[:i] + route[i:j+1][::-1] + route[j+1:]
+
 
 def two_opt_gain(pacman_start: Position, route: list[Position], i: int, j: int, matrix: dict[Position, dict[Position, int]]) -> int:
     # Determine the node before index i
@@ -213,6 +274,7 @@ def two_opt_gain(pacman_start: Position, route: list[Position], i: int, j: int, 
 
     return old_cost - new_cost  # positive means improvement
 
+
 def two_opt(pacman_start: Position, route: list[Position], matrix: dict[Position, dict[Position, int]]) -> list[Position]:
     route = list(route)
     improved = True
@@ -227,7 +289,8 @@ def two_opt(pacman_start: Position, route: list[Position], matrix: dict[Position
 
     return route
 
-#---------------------END OF SHORTEST CLEAR CODE---------------------------------------------------------
+# ---------------------END OF SHORTEST CLEAR CODE---------------------------------------------------------
+
 
 def neighbors(grid: list[list[str]], pos: Position) -> list[Position]:
     x, y = pos
@@ -241,6 +304,8 @@ def neighbors(grid: list[list[str]], pos: Position) -> list[Position]:
     ]
 
 # Simulate wrap-around connectivity for validation
+
+
 def wrap_neighbors(grid: list[list[str]], pos: Position) -> list[Position]:
     width = len(grid[0])
     height = len(grid)
@@ -263,17 +328,18 @@ def wrap_neighbors(grid: list[list[str]], pos: Position) -> list[Position]:
     return result
 
 # BFS with wrap-around
+
+
 def bfs_wrap(grid: list[list[str]], start: Position) -> dict[Position, int]:
     queue: deque[Position] = deque([start])
     distances = {start: 0}
     while queue:
         pos = queue.popleft()
-        for neighbor in wrap_neighbors(grid,pos):
+        for neighbor in wrap_neighbors(grid, pos):
             if neighbor not in distances:
                 distances[neighbor] = distances[pos] + 1
                 queue.append(neighbor)
     return distances
-
 
 
 def is_valid_maze(
@@ -317,7 +383,8 @@ def is_valid_maze(
         print("Validation failed: Ghost respawn location must be inside a wall.")
         return False
 
-    adjacent_open_cells = [neighbor for neighbor in neighbors(grid, ghost_respawn_location)]
+    adjacent_open_cells = [neighbor for neighbor in neighbors(
+        grid, ghost_respawn_location)]
     if not adjacent_open_cells:
         print("Validation failed: Ghost respawn location is not next to open space.")
         return False
@@ -327,71 +394,21 @@ def is_valid_maze(
         return False
 
     # Maintain minimum junctions for maze complexity
-    junction_count = sum(1 for cell in open_cells if len(wrap_neighbors(grid, cell)) >= 3)
+    junction_count = sum(1 for cell in open_cells if len(
+        wrap_neighbors(grid, cell)) >= 3)
     min_junctions = max(4, (len(grid) * len(grid[0])) // 60)
     return junction_count >= min_junctions
+
 
 def _has_enough_walls(grid):
     total = len(grid) * len(grid[0])
     walls = sum(cell == WALL for row in grid for cell in row)
     return walls > total * 0.2
 
-def analyze_maze(
-    grid: list[list[str]],
-    pacman_start: Position,
-    ghost_starts: list[Position],
-    config: DifficultyConfig,
-) -> MazeAnalysis:
-    distances = bfs_wrap(grid, pacman_start)
-    open_cells = _walkable_cells(grid)
-    pellets = [
-        (x, y)
-        for y, row in enumerate(grid)
-        for x, tile in enumerate(row)
-        if tile in {PELLET, POWER}
-    ]
-    connected = all(cell in distances for cell in open_cells)
-    all_pellets_reachable = all(pellet in distances for pellet in pellets)
-
-    branch_counts = [len(wrap_neighbors(grid, cell)) for cell in open_cells]
-    dead_ends = sum(1 for count in branch_counts if count == 1)
-    junction_count = sum(1 for count in branch_counts if count >= 3)
-    dead_end_ratio = dead_ends / max(1, len(open_cells))
-    average_branching_factor = sum(branch_counts) / max(1, len(branch_counts))
-    average_corridor_length = _average_corridor_length(grid, open_cells)
-    nearest_ghost_distance = min(
-        (distances.get(ghost, 10_000) for ghost in ghost_starts),
-        default=10_000,
-    )
-    estimated_collection_distance = _estimate_collection_distance(grid, pacman_start, pellets)
-
-    score = _maze_difficulty_score(
-        config,
-        dead_end_ratio,
-        average_branching_factor,
-        average_corridor_length,
-        nearest_ghost_distance,
-        estimated_collection_distance,
-        len(pellets),
-    )
-
-    return MazeAnalysis(
-        connected,
-        all_pellets_reachable,
-        len(open_cells),
-        len(pellets),
-        dead_end_ratio,
-        junction_count,
-        average_branching_factor,
-        average_corridor_length,
-        nearest_ghost_distance,
-        estimated_collection_distance,
-        score,
-    )
-
 
 def _create_wall_grid(width: int, height: int) -> list[list[str]]:
     return [[WALL for _ in range(width)] for _ in range(height)]
+
 
 def _carve_depth_first_maze(grid: list[list[str]]) -> None:
     width = len(grid[0])
@@ -399,7 +416,7 @@ def _carve_depth_first_maze(grid: list[list[str]]) -> None:
     # start = (1, 1)
     start = (random.randrange(1, width-1), random.randrange(1, height-1))
     grid[start[1]][start[0]] = EMPTY
-    stack : list[tuple[int, int]] = [start]
+    stack: list[tuple[int, int]] = [start]
     visited = {start}
 
     while stack:
@@ -423,6 +440,7 @@ def _carve_depth_first_maze(grid: list[list[str]]) -> None:
         stack.append((nx, ny))
         visited.add((nx, ny))
 
+
 def _open_extra_cells(grid: list[list[str]], openness: float) -> None:
     width = len(grid[0])
     height = len(grid)
@@ -433,10 +451,11 @@ def _open_extra_cells(grid: list[list[str]], openness: float) -> None:
             if grid[y][x] == WALL and random.random() < probability:
                 adjacent = sum(
                     grid[y + dy][x + dx] != WALL
-                    for dx, dy in ((1,0),(-1,0),(0,1),(0,-1))
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
                 )
                 if adjacent >= 3:
                     grid[y][x] = EMPTY
+
 
 def _apply_wrap_portals(grid, max_pairs=3):
     width = len(grid[0])
@@ -454,9 +473,9 @@ def _apply_wrap_portals(grid, max_pairs=3):
             grid[y][i+1] = EMPTY
             i += 1
         i = 0
-        while len(neighbors(grid, (width - 1-i, y))) == 0: 
+        while len(neighbors(grid, (width - 1-i, y))) == 0:
             grid[y][width - 2-i] = EMPTY
-            i += 1          
+            i += 1
 
     # vertical portals
     xs = random.sample(range(1, width - 1), k=max_pairs)
@@ -474,6 +493,7 @@ def _apply_wrap_portals(grid, max_pairs=3):
             grid[height - 2-i][x] = EMPTY
             i += 1
 
+
 def _walkable_cells(grid: list[list[str]]) -> list[Position]:
     return [
         (x, y)
@@ -481,6 +501,7 @@ def _walkable_cells(grid: list[list[str]]) -> list[Position]:
         for x, tile in enumerate(row)
         if tile != WALL
     ]
+
 
 def _add_spikes(
     grid: list[list[str]],
@@ -500,7 +521,9 @@ def _add_spikes(
         and len(wrap_neighbors(grid, pos)) >= 2
     ]
     candidates.sort(key=lambda p: distances[p], reverse=True)
-    random.shuffle(candidates[: min(count * 4, len(candidates))])
+    top_candidates = candidates[: min(8, len(candidates))]
+    random.shuffle(top_candidates)
+    candidates = top_candidates + candidates[min(8, len(candidates)):]
 
     def _safe_walkable_count(center: Position, radius: int = 2) -> int:
         sx, sy = center
@@ -557,8 +580,10 @@ def _add_spikes(
         grid[y][x] = SPIKE
         placed += 1
 
+
 def _choose_pacman_start(open_cells: list[Position]) -> Position:
     return min(open_cells, key=lambda cell: cell[0] + cell[1])
+
 
 def _choose_ghost_starts(
     open_cells: list[Position],
@@ -568,10 +593,8 @@ def _choose_ghost_starts(
 ) -> list[Position]:
     candidates = [cell for cell in open_cells if distances.get(
         cell, 0) >= min_distance]
-    candidates.sort(key=lambda cell: distances.get(cell, 0))
-    top_candidates = candidates[: min(12, len(candidates))]
-    random.shuffle(top_candidates)
-    candidates = top_candidates + candidates[min(12, len(candidates)):]
+    candidates.sort(key=lambda cell: distances.get(cell, 0), reverse=True)
+    random.shuffle(candidates[: min(8, len(candidates))])
 
     starts: list[Position] = []
     for cell in candidates:
@@ -580,6 +603,7 @@ def _choose_ghost_starts(
         if len(starts) == ghost_count:
             break
     return starts
+
 
 def _choose_ghost_respawn_location(
     grid: list[list[str]],
@@ -597,7 +621,8 @@ def _choose_ghost_respawn_location(
             if not adjacent_open_cells:
                 continue
 
-            nearest_distance = min(distances.get(cell, 0) for cell in adjacent_open_cells)
+            nearest_distance = min(distances.get(cell, 0)
+                                   for cell in adjacent_open_cells)
             if nearest_distance >= min_distance:
                 candidates.append(((x, y), nearest_distance))
 
@@ -609,11 +634,13 @@ def _choose_ghost_respawn_location(
     random.shuffle(shortlist)
     return shortlist[0][0]
 
+
 def _add_pellets(grid: list[list[str]], blocked: set[Position]) -> None:
     for y, row in enumerate(grid):
         for x, tile in enumerate(row):
             if tile == EMPTY and (x, y) not in blocked:
                 grid[y][x] = PELLET
+
 
 def _add_power_pellets(
     grid: list[list[str]],
@@ -665,12 +692,14 @@ def _add_power_pellets(
     for x, y in selected:
         grid[y][x] = POWER
 
+
 def _make_odd(value: int) -> int:
     return value if value % 2 == 1 else value + 1
 
 
 def _average_corridor_length(grid: list[list[str]], open_cells: list[Position]) -> float:
-    corridor_cells = [cell for cell in open_cells if len(wrap_neighbors(grid, cell)) == 2]
+    corridor_cells = [cell for cell in open_cells if len(
+        wrap_neighbors(grid, cell)) == 2]
     if not corridor_cells:
         return 0.0
     visited: set[Position] = set()
@@ -688,7 +717,8 @@ def _average_corridor_length(grid: list[list[str]], open_cells: list[Position]) 
                 continue
             visited.add(cell)
             length += 1
-            stack.extend(neighbor for neighbor in wrap_neighbors(grid, cell) if neighbor not in visited)
+            stack.extend(neighbor for neighbor in wrap_neighbors(
+                grid, cell) if neighbor not in visited)
 
         if length:
             lengths.append(length)
@@ -710,7 +740,8 @@ def _estimate_collection_distance(
 
     while remaining:
         distances = bfs_wrap(grid, current)
-        nearest = min(remaining, key=lambda pellet: distances.get(pellet, 10_000))
+        nearest = min(
+            remaining, key=lambda pellet: distances.get(pellet, 10_000))
         distance = distances.get(nearest, 10_000)
         if distance >= 10_000:
             break
@@ -730,13 +761,16 @@ def _maze_difficulty_score(
     estimated_collection_distance: int,
     pellet_count: int,
 ) -> float:
-    agent_score = {"random": 0.3, "heuristic": 1.8, "mcts": 2.7}.get(config.ghost_agent, 1.0)
-    ghost_pressure = min(1.5, config.ghost_count * 0.35) + (0.4 * max(0, config.ghost_speed - 1))
+    agent_score = {"random": 0.3, "heuristic": 1.8,
+                   "mcts": 2.7}.get(config.ghost_agent, 1.0)
+    ghost_pressure = min(1.5, config.ghost_count * 0.35) + \
+        (0.4 * max(0, config.ghost_speed - 1))
     dead_end_pressure = min(1.0, dead_end_ratio * 4.0)
     corridor_pressure = min(0.8, average_corridor_length / 12.0)
     branch_relief = min(0.8, max(0.0, average_branching_factor - 2.0) * 0.6)
     start_relief = min(0.8, nearest_ghost_distance / 20.0)
-    collection_pressure = min(0.8, estimated_collection_distance / max(1, pellet_count * 8))
+    collection_pressure = min(
+        0.8, estimated_collection_distance / max(1, pellet_count * 8))
     power_relief = min(0.8, config.power_pellets * 0.12)
 
     raw_score = (
