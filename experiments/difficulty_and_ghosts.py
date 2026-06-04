@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents import ghost_heuristic, ghost_mcts, ghost_random
 from game.difficulty import DIFFICULTY_LEVELS, DifficultyConfig, get_config, performance_score
-from game.maze_generator import PELLET, POWER, SPIKE, bfs_distances, generate_balanced_maze
+from game.maze_generator import PELLET, POWER, SPIKE, bfs_wrap, generate_balanced_maze
 from game.pacman_env import PacmanEnv
 
 
@@ -286,7 +286,7 @@ def count_pellets(grid: list[list[str]]) -> int:
 
 
 def nearest_pellet_distance(env: PacmanEnv, pos: tuple[int, int], pellets: list[tuple[int, int]]) -> int:
-    distances = bfs_distances(env.grid, pos)
+    distances = bfs_wrap(env.grid, pos)
     return min((distances.get(pellet, 10_000) for pellet in pellets), default=0)
 
 
