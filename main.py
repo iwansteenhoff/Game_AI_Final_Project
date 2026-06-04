@@ -3,8 +3,9 @@ from __future__ import annotations
 import random
 import sys
 
+import sys
 import pygame
-
+import math
 from agents import ghost_heuristic, ghost_mcts, ghost_random
 
 import game
@@ -12,10 +13,16 @@ from game.difficulty import PlayerProfile, RunMetrics, get_config, performance_s
 from game.maze_generator import PELLET, POWER, WALL, generate_balanced_maze, solve
 from game.pacman_env import PacmanEnv
 
+
 CELL_SIZE = 28
 GRID_WIDTH = 21
 GRID_HEIGHT = 21
-FPS = 10
+FPS = 60  # Higher FPS for smooth movement
+
+# Movement speeds (pixels per frame at 60 FPS)
+PACMAN_SPEED = 0.1
+GHOST_SPEED = 0.1
+GHOST_FRIGHTENED_SPEED = 2.0
 
 BLACK = (8, 10, 18)
 WALL_BLUE = (42, 91, 214)
@@ -23,7 +30,11 @@ PATH = (16, 19, 31)
 PELLET_COLOR = (246, 217, 139)
 POWER_COLOR = (126, 224, 170)
 PACMAN_YELLOW = (255, 213, 64)
-GHOST_RED = (234, 74, 91)
+GHOST_FRIGHTENED = (58, 110, 220)
+GHOST_FLASH = (230, 230, 255)
+GHOST_RESPAWNING = (122, 128, 145)
+RESPAWN_OUTLINE = (255, 105, 180)
+SPIKE_COLOR = (255, 100, 40)
 TEXT = (238, 242, 255)
 PACMAN_YELLOW = (255, 213, 64)
 GHOST_RED = (234, 74, 91)
@@ -62,6 +73,15 @@ def main() -> int:
     difficulty = 1
     profile = PlayerProfile(history_size=5)
     env = create_environment(difficulty)
+
+    #  Smooth movement state 
+    pacman_pixel_pos = [env.pacman_pos[0] * CELL_SIZE + CELL_SIZE // 2, env.pacman_pos[1] * CELL_SIZE + CELL_SIZE // 2]
+    pacman_next_dir = "STAY"  # Buffered input
+    ghost_pixel_pos = [
+        [gx * CELL_SIZE + CELL_SIZE // 2, gy * CELL_SIZE + CELL_SIZE // 2]
+        for gx, gy in env.ghost_positions
+    ]
+
     current_action = "STAY"
     desired_action: str | None = None
     last_performance: float | None = None
@@ -78,37 +98,19 @@ def main() -> int:
                     running = False
                 elif event.key == pygame.K_r:
                     env = create_environment(difficulty)
-                    current_action = "STAY"
-                    desired_action = None
                 elif event.key in KEY_TO_ACTION:
-                    desired_action = KEY_TO_ACTION[event.key]
-            elif event.type == pygame.KEYUP and event.key in KEY_TO_ACTION:
-                released_action = KEY_TO_ACTION[event.key]
-                pressed = pygame.key.get_pressed()
-                if desired_action == released_action and not action_is_pressed(pressed, released_action):
-                    desired_action = None
+                    # Buffered input: store next intended direction
+                    pacman_next_dir = KEY_TO_ACTION[event.key]
 
         if not env.done:
-            legal = env.legal_actions_for_pacman()
-            pressed = pygame.key.get_pressed()
-            if desired_action is not None and not action_is_pressed(pressed, desired_action):
-                desired_action = None
-
-            if desired_action in legal:
-                pacman_action = desired_action
-            elif current_action in legal and action_is_pressed(pressed, current_action):
-                pacman_action = current_action
-            else:
-                pacman_action = "STAY"
-            current_action = pacman_action
-
             config = get_config(difficulty)
             ghost_actions = choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression)
-            env.step(pacman_action, ghost_actions)
-            for _ in range(config.ghost_speed - 1):
-                if env.done:
-                    break
-                env.step("STAY", choose_ghost_actions(env, config.ghost_agent, config.ghost_aggression))
+            env.step(pacman_next_dir, ghost_actions)
+
+            pacman_pixel_pos = env.pacman_pixel_pos[:]
+            # Update ghost pixel positions
+            ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
+
         else:
             config = get_config(difficulty)
             if env.won:
@@ -146,19 +148,24 @@ def main() -> int:
             last_win_rate = profile.recent_win_rate
             last_pellet_completion = profile.recent_pellet_completion
             env = create_environment(difficulty)
-            current_action = "STAY"
-            desired_action = None
+            pacman_next_dir = "STAY"
+            pacman_pixel_pos = env.pacman_pixel_pos[:]
+            ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
 
-        draw(
+        #  Drawing 
+        draw_smooth(
             screen,
             font,
             env,
             difficulty,
             last_performance,
+            pacman_pixel_pos, 
+            ghost_pixel_pos,
             profile.recent_performance,
             last_win_rate,
             last_pellet_completion,
         )
+        
         pygame.display.flip()
         clock.tick(FPS)
 
@@ -174,7 +181,12 @@ def create_environment(difficulty: int) -> PacmanEnv:
         generated.grid,
         generated.pacman_start,
         generated.ghost_starts,
-        max_steps=GRID_WIDTH * GRID_HEIGHT * 2,
+      
+        generated.ghost_respawn_location,
+        max_steps=GRID_WIDTH * GRID_HEIGHT * 20,
+        frighten_duration=config.frighten_duration,
+        move_speed=PACMAN_SPEED,
+      
         generated_greedy_solution=generated_greedy_solution,
         maze_difficulty_score=generated.difficulty_score,
     )
@@ -199,12 +211,76 @@ def choose_ghost_actions(env: PacmanEnv, agent_name: str, aggression: float) -> 
     return actions
 
 
-def draw(
+def draw_pacman_at(px, py, screen, env, id=0):
+    # Animation (open/close)
+    mouth_phase = (pygame.time.get_ticks() // 100) % 4
+    mouth_angle = 30 if mouth_phase < 2 else 5
+
+    # Direction → base angle
+    dir_to_angle = {
+        "RIGHT": 0,
+        "DOWN": 270,
+        "LEFT": 180,
+        "UP": 90,
+        "STAY": 0,  # fallback
+    }
+
+    base_angle = dir_to_angle.get(env.pacman_dir, 0)
+
+    pacman_rect = pygame.Rect(0, 0, CELL_SIZE - 8, CELL_SIZE - 8)
+    pacman_rect.center = (round(px), round(py))
+    # --- Draw full yellow body ---
+    pygame.draw.circle(
+        screen,
+        PACMAN_YELLOW,
+        pacman_rect.center,
+        pacman_rect.width // 2
+    )
+
+    # --- Cut out mouth using a triangle ---
+    cx, cy = pacman_rect.center
+    r = pacman_rect.width - (pacman_rect.width // 2) # rounding up
+
+    angle1 = math.radians(base_angle + mouth_angle)
+    angle2 = math.radians(base_angle - mouth_angle)
+
+    p1 = (cx, cy)
+    p2 = (cx + 1.1 * r * math.cos(angle1), cy - 1.1 * r * math.sin(angle1))
+    p3 = (cx + 1.1 * r * math.cos(angle2), cy - 1.1 * r * math.sin(angle2))
+
+    pygame.draw.polygon(screen, PATH, [p1, p2, p3])
+
+def draw_ghost_at(gx, gy, screen, env, id=0):
+    respawn_timer = env.ghost_respawn_timers[id] if id < len(env.ghost_respawn_timers) else 0
+    frightened_timer = env.ghost_frighten_timers[id] if id < len(env.ghost_frighten_timers) else 0
+
+    if respawn_timer > 0:
+        color = GHOST_RESPAWNING
+    elif frightened_timer > 0:
+        flash = ((frightened_timer // 15) % 2) == 0
+        color = GHOST_FLASH if flash else GHOST_FRIGHTENED
+    else:
+        color = GHOST_RED
+    ghost_rect = pygame.Rect(0, 0, CELL_SIZE - 10, CELL_SIZE - 10)
+    ghost_rect.center = (int(gx), int(gy))
+    pygame.draw.rect(screen, color, ghost_rect, border_radius=5)
+    # Eyes (simple)
+    eye_offset = 4
+    pygame.draw.circle(screen, (255, 255, 255), (ghost_rect.centerx - eye_offset, ghost_rect.centery - 2), 3)
+    pygame.draw.circle(screen, (255, 255, 255), (ghost_rect.centerx + eye_offset, ghost_rect.centery - 2), 3)
+    pygame.draw.circle(screen, (0, 0, 255), (ghost_rect.centerx - eye_offset, ghost_rect.centery - 2), 1)
+    pygame.draw.circle(screen, (0, 0, 255), (ghost_rect.centerx + eye_offset, ghost_rect.centery - 2), 1)
+    
+    
+#  New draw function for smooth movement and animation 
+def draw_smooth(
     screen: pygame.Surface,
     font: pygame.font.Font,
     env: PacmanEnv,
     difficulty: int,
     last_performance: float | None,
+    pacman_pixel_pos: list[float],
+    ghost_pixel_pos: list[list[float]],
     recent_performance: float | None,
     recent_win_rate: float | None,
     recent_pellet_completion: float | None,
@@ -222,30 +298,24 @@ def draw(
             elif tile == POWER:
                 pygame.draw.circle(screen, POWER_COLOR, center, 7)
 
-    px, py = env.pacman_pos
-    pygame.draw.circle(
-        screen,
-        PACMAN_YELLOW,
-        (px * CELL_SIZE + CELL_SIZE // 2, py * CELL_SIZE + CELL_SIZE // 2),
-        CELL_SIZE // 2 - 4,
+    respawn_rect = pygame.Rect(
+        env.ghost_respawn_location[0] * CELL_SIZE,
+        env.ghost_respawn_location[1] * CELL_SIZE,
+        CELL_SIZE,
+        CELL_SIZE,
     )
+    pygame.draw.rect(screen, (0, 0, 0), respawn_rect)
+    pygame.draw.rect(screen, RESPAWN_OUTLINE, respawn_rect, width=3)
 
+    # Pacman animation (simple mouth open/close) 
+    px, py = pacman_pixel_pos
     
-    config = get_config(difficulty)
-    
-    for ghost_id, (gx, gy) in enumerate(env.ghost_positions):
-        if ghost_id == 0:
-            current_color = GHOST_GREEN
-        elif ghost_id == 1:
-            current_color = GHOST_ORANGE
-        else:
-            current_color = GHOST_RED
+    draw_pacman_at(px, py, screen, env)
     
 
-    for gx, gy in env.ghost_positions:
-        ghost_rect = pygame.Rect(gx * CELL_SIZE + 5, gy * CELL_SIZE + 5, CELL_SIZE - 10, CELL_SIZE - 10)
-        # Use our new dynamic 'current_color' instead of the hardcoded GHOST_RED
-        pygame.draw.rect(screen, current_color, ghost_rect, border_radius=5)
+    #  Ghosts (simple animation: eyes) 
+    for i, (gx, gy) in enumerate(ghost_pixel_pos):
+        draw_ghost_at(gx, gy, screen, env, id=i)
 
     score_text = (
         f"Difficulty: {difficulty} | Ghosts: {len(env.ghost_positions)} "

@@ -85,6 +85,7 @@ def _legal_actions_from_grid(state, pos):
 def _next_position_from_grid(state, pos, action):
     dx, dy = ACTION_DELTAS.get(action, (0, 0))
     nx, ny = pos[0] + dx, pos[1] + dy
-    if state.grid[ny][nx] == "#":
+    respawn_location = getattr(state, "ghost_respawn_location", None)
+    if state.grid[ny][nx] == "#" and (nx, ny) != respawn_location:
         return pos
     return nx, ny

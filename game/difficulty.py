@@ -15,6 +15,8 @@ class DifficultyConfig:
     maze_openness: float
     min_start_distance: int
     ghost_speed: int = 1
+    spike_count: int = 0
+    frighten_duration: int = 180  # frames ghosts stay frightened at 60 FPS
     ghost_aggression: float = 1.0
 
 
@@ -36,14 +38,13 @@ class RunMetrics:
 
 
 DIFFICULTY_LEVELS: dict[int, DifficultyConfig] = {
-    0: DifficultyConfig("random", 1, 9, 0.66, 24, ghost_aggression=0.0),
-    1: DifficultyConfig("random", 1, 8, 0.63, 22, ghost_aggression=0.0),
-    2: DifficultyConfig("heuristic", 1, 7, 0.60, 20, ghost_aggression=0.08),
-    3: DifficultyConfig("heuristic", 2, 6, 0.57, 18, ghost_aggression=0.18),
-    4: DifficultyConfig("heuristic", 2, 5, 0.54, 16, ghost_aggression=0.32),
-    5: DifficultyConfig("mcts", 2, 4, 0.50, 14, ghost_speed=1, ghost_aggression=0.45),
+    0: DifficultyConfig("random", 1, 9, 0.66, 24, spike_count=0,  frighten_duration=240, ghost_aggression=0.0),
+    1: DifficultyConfig("random", 1, 8, 0.63, 22, spike_count=2,  frighten_duration=210, ghost_aggression=0.0),
+    2: DifficultyConfig("heuristic", 1, 7, 0.60, 20, spike_count=4,  frighten_duration=180, ghost_aggression=0.08),
+    3: DifficultyConfig("heuristic", 2, 6, 0.57, 18, spike_count=6,  frighten_duration=150, ghost_aggression=0.18),
+    4: DifficultyConfig("heuristic", 2, 5, 0.54, 16, spike_count=8,  frighten_duration=120, ghost_aggression=0.32),
+    5: DifficultyConfig("mcts", 2, 4, 0.50, 14, ghost_speed=1, spike_count=10, frighten_duration=90, ghost_aggression=0.45),
 }
-
 
 TARGET_LOW = 0.45
 TARGET_HIGH = 0.75
