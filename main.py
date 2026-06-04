@@ -82,8 +82,6 @@ def main() -> int:
         for gx, gy in env.ghost_positions
     ]
 
-    current_action = "STAY"
-    desired_action: str | None = None
     last_performance: float | None = None
     last_win_rate: float | None = None
     last_pellet_completion: float | None = None
@@ -286,6 +284,8 @@ def draw_smooth(
     recent_pellet_completion: float | None,
 ) -> None:
     screen.fill(BLACK)
+    
+    config = get_config(difficulty)
 
     for y, row in enumerate(env.grid):
         for x, tile in enumerate(row):

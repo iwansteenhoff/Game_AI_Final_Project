@@ -121,6 +121,7 @@ def generate_balanced_maze(
                 maze.grid,
                 maze.pacman_start,
                 maze.ghost_starts,
+                maze.ghost_respawn_location,
                 analysis.difficulty_score,
             )
 
