@@ -13,6 +13,7 @@ ACTION_DELTAS: dict[str, Position] = {
     "RIGHT": (1, 0),
     "STAY": (0, 0),
 }
+DEFAULT_GHOST_RESPAWN_DELAY = 180
 
 
 @dataclass
@@ -49,7 +50,7 @@ class PacmanEnv:
         ghost_respawn_location: Position,
         max_steps: int = 700,
         frighten_duration: int = 2400,
-        ghost_respawn_delay: int = 180,
+        ghost_respawn_delay: int = DEFAULT_GHOST_RESPAWN_DELAY,
         move_speed: float = 0.1,
         cell_size: int = 28,  # For pixel calculations
         maze_difficulty_score: float = 0.0,

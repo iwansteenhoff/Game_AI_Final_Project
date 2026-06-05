@@ -54,7 +54,7 @@ To also generate a Matplotlib visualization:
 python3 experiments/maze_feasibility.py --samples 100 --seed 42 --output results/maze_feasibility.csv --visualization results/maze_feasibility.png
 ```
 
-The experiment reports generation/validity rates, connectivity, pellet reachability, dead-end ratio, junction count, branching factor, corridor length, nearest ghost distance, estimated collection distance, and estimated maze difficulty score. The visualization shows mean values with standard-deviation bands or error bars where applicable.
+The experiment reports generation/validity rates, safe connectivity, pellet reachability without crossing spikes, actual placed spike count, dead-end ratio, junction count, branching factor, corridor length, nearest ghost distance, estimated safe collection distance, and estimated maze difficulty score. The visualization shows mean values with standard-deviation bands or error bars where applicable.
 
 ### Difficulty Calibration and Ghost Comparison
 
@@ -71,6 +71,8 @@ python3 experiments/difficulty_and_ghosts.py --episodes 30 --seed 42 --difficult
 ```
 
 The difficulty calibration runs random, greedy, and cautious Pacman baselines and reports win rate, pellet completion, survival time, performance score, and ghosts eaten. The ghost comparison keeps maze difficulty fixed and compares random, heuristic, and MCTS ghosts using win rate, pellet completion, steps until the episode ends, and average ghost distance. The visualization plots means with standard-deviation bands/error bars.
+
+Automated episodes use tile steps rather than rendered frames. Frightened and eaten-ghost respawn durations are scaled to preserve the same gameplay timing as the playable game.
 
 ### Adaptive Difficulty
 

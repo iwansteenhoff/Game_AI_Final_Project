@@ -16,15 +16,26 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents import ghost_frightened, ghost_heuristic, ghost_mcts, ghost_random
 from game.difficulty import DIFFICULTY_LEVELS, DifficultyConfig, get_config, performance_score
-from game.maze_generator import PELLET, POWER, SPIKE, bfs_wrap, generate_balanced_maze
-from game.pacman_env import PacmanEnv
+from game.maze_generator import (
+    PELLET,
+    POWER,
+    SPIKE,
+    bfs_wrap_avoiding_spikes,
+    generate_balanced_maze,
+    solve,
+)
+from game.pacman_env import DEFAULT_GHOST_RESPAWN_DELAY, PacmanEnv
 
 
 GRID_WIDTH = 21
 GRID_HEIGHT = 21
 DEFAULT_EPISODES = 10
 DEFAULT_GHOST_COMPARISON_LEVEL = 3
-DEFAULT_MAX_STEPS = 250
+GAME_MOVE_SPEED = 0.1
+SIMULATION_MOVE_SPEED = 1.0
+GAME_FRAMES_PER_SIMULATION_STEP = round(
+    SIMULATION_MOVE_SPEED / GAME_MOVE_SPEED)
+DEFAULT_MAX_STEPS = 3600
 DEFAULT_MCTS_ROLLOUTS = 6
 DEFAULT_MCTS_DEPTH = 5
 PACMAN_AGENTS = ("random", "greedy", "cautious")
@@ -45,6 +56,8 @@ class EpisodeResult:
     ghosts_eaten: int
     score: float
     average_ghost_distance: float
+    deaths_to_ghost: int
+    maze_difficulty_score: float
 
     @property
     def pellet_completion(self) -> float:
@@ -140,7 +153,7 @@ def run_ghost_comparison(
 
     for _ in range(episodes):
         maze = generate_balanced_maze(GRID_WIDTH, GRID_HEIGHT, base_config, difficulty, candidates=candidates)
-        greedy_solution = count_pellets(maze.grid)
+        greedy_solution = solve(maze)
 
         for name, ghost_agent, aggression in GHOST_SETTINGS:
             config = replace(base_config, ghost_agent=ghost_agent, ghost_aggression=aggression)
@@ -179,7 +192,7 @@ def run_episode(
     max_steps: int,
 ) -> EpisodeResult:
     maze = generate_balanced_maze(GRID_WIDTH, GRID_HEIGHT, config, target_difficulty, candidates=candidates)
-    return run_episode_on_maze(maze, config, pacman_agent, count_pellets(maze.grid), max_steps)
+    return run_episode_on_maze(maze, config, pacman_agent, solve(maze), max_steps)
 
 
 def run_episode_on_maze(
@@ -195,19 +208,20 @@ def run_episode_on_maze(
         maze.ghost_starts,
         maze.ghost_respawn_location,
         max_steps=max_steps,
+        frighten_duration=simulation_duration(config.frighten_duration),
+        ghost_respawn_delay=simulation_duration(DEFAULT_GHOST_RESPAWN_DELAY),
+        move_speed=SIMULATION_MOVE_SPEED,
         maze_difficulty_score=maze.difficulty_score,
         generated_greedy_solution=generated_greedy_solution,
     )
     ghost_distances = []
 
     while not env.done:
-        ghost_distances.append(nearest_ghost_distance(env))
+        ghost_distance = nearest_ghost_distance(env)
+        if ghost_distance is not None:
+            ghost_distances.append(ghost_distance)
         pacman_action = choose_pacman_action(env, pacman_agent)
         env.step(pacman_action, choose_ghost_actions(env, config))
-        for _ in range(config.ghost_speed - 1):
-            if env.done:
-                break
-            env.step("STAY", choose_ghost_actions(env, config))
 
     score = performance_score(
         env.pellets_collected,
@@ -230,6 +244,8 @@ def run_episode_on_maze(
         ghosts_eaten=int(env.ghosts_eaten),
         score=score,
         average_ghost_distance=average(ghost_distances),
+        deaths_to_ghost=env.deaths_to_ghost,
+        maze_difficulty_score=env.maze_difficulty_score,
     )
 
 
@@ -272,7 +288,10 @@ def cautious_greedy_action(env: PacmanEnv) -> str:
         next_pos = env.next_position(env.pacman_pos, action)
         pellet_distance = nearest_pellet_distance(env, next_pos, pellets) if pellets else 0
         ghost_distance = min(
-            (env.shortest_path_distance(next_pos, ghost_pos) for ghost_pos in env.ghost_positions),
+            (
+                env.shortest_path_distance(next_pos, env.ghost_positions[ghost_id])
+                for ghost_id in dangerous_ghost_ids(env)
+            ),
             default=20,
         )
         danger_penalty = max(0, 5 - ghost_distance) * 8
@@ -300,20 +319,38 @@ def pellet_positions(env: PacmanEnv) -> list[tuple[int, int]]:
     ]
 
 
-def count_pellets(grid: list[list[str]]) -> int:
-    return sum(tile in {PELLET, POWER} for row in grid for tile in row)
-
-
 def nearest_pellet_distance(env: PacmanEnv, pos: tuple[int, int], pellets: list[tuple[int, int]]) -> int:
-    distances = bfs_wrap(env.grid, pos)
+    distances = bfs_wrap_avoiding_spikes(env.grid, pos)
     return min((distances.get(pellet, 10_000) for pellet in pellets), default=0)
 
 
-def nearest_ghost_distance(env: PacmanEnv) -> int:
-    return min(
-        (env.shortest_path_distance(env.pacman_pos, ghost_pos) for ghost_pos in env.ghost_positions),
-        default=0,
-    )
+def nearest_ghost_distance(env: PacmanEnv) -> int | None:
+    distances = [
+        env.shortest_path_distance(env.pacman_pos, env.ghost_positions[ghost_id])
+        for ghost_id in active_ghost_ids(env)
+    ]
+    return min(distances) if distances else None
+
+
+def active_ghost_ids(env: PacmanEnv) -> list[int]:
+    return [
+        ghost_id
+        for ghost_id, timer in enumerate(env.ghost_respawn_timers)
+        if timer <= 0
+    ]
+
+
+def dangerous_ghost_ids(env: PacmanEnv) -> list[int]:
+    frightened = env.frightened_ghosts
+    return [
+        ghost_id
+        for ghost_id in active_ghost_ids(env)
+        if ghost_id not in frightened
+    ]
+
+
+def simulation_duration(game_frames: int) -> int:
+    return max(1, round(game_frames / GAME_FRAMES_PER_SIMULATION_STEP))
 
 
 def choose_ghost_actions(env: PacmanEnv, config: DifficultyConfig) -> list[str]:

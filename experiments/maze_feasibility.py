@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from game.difficulty import DIFFICULTY_LEVELS, get_config
-from game.maze_generator import analyze_maze, generate_maze, is_valid_maze
+from game.maze_generator import SPIKE, analyze_maze, generate_maze, is_valid_maze
 
 
 DEFAULT_WIDTH = 21
@@ -37,6 +37,7 @@ class LevelResult:
     reachable_pellet_samples: int
     average_open_cells: float
     average_pellets: float
+    average_spikes: float
     average_dead_end_ratio: float
     average_junction_count: float
     average_branching_factor: float
@@ -50,6 +51,7 @@ class LevelResult:
     std_nearest_ghost_distance: float
     std_collection_distance: float
     std_maze_difficulty_score: float
+    std_spikes: float
 
     @property
     def generation_rate(self) -> float:
@@ -73,6 +75,7 @@ def run_experiment(
     for level in sorted(DIFFICULTY_LEVELS):
         config = get_config(level)
         analyses = []
+        spike_counts = []
         valid_samples = 0
         connected_samples = 0
         reachable_pellet_samples = 0
@@ -85,6 +88,7 @@ def run_experiment(
 
             analysis = analyze_maze(maze.grid, maze.pacman_start, maze.ghost_starts, config)
             analyses.append(analysis)
+            spike_counts.append(sum(tile == SPIKE for row in maze.grid for tile in row))
 
             if is_valid_maze(
                 maze.grid,
@@ -109,6 +113,7 @@ def run_experiment(
                 reachable_pellet_samples=reachable_pellet_samples,
                 average_open_cells=average(a.open_cell_count for a in analyses),
                 average_pellets=average(a.pellet_count for a in analyses),
+                average_spikes=average(spike_counts),
                 average_dead_end_ratio=average(a.dead_end_ratio for a in analyses),
                 average_junction_count=average(a.junction_count for a in analyses),
                 average_branching_factor=average(a.average_branching_factor for a in analyses),
@@ -122,6 +127,7 @@ def run_experiment(
                 std_nearest_ghost_distance=stddev(a.nearest_ghost_distance for a in analyses),
                 std_collection_distance=stddev(a.estimated_collection_distance for a in analyses),
                 std_maze_difficulty_score=stddev(a.difficulty_score for a in analyses),
+                std_spikes=stddev(spike_counts),
             )
         )
 
@@ -145,7 +151,7 @@ def stddev(values) -> float:
 
 def print_results(results: list[LevelResult]) -> None:
     header = (
-        "level gen% valid% conn% pellets% open pellets dead_end junctions "
+        "level gen% valid% conn% pellets% open pellets spikes dead_end junctions "
         "branch corridor ghost_dist collect_dist maze_score"
     )
     print(header)
@@ -159,6 +165,7 @@ def print_results(results: list[LevelResult]) -> None:
             f"{result.reachable_pellet_samples / max(1, result.requested_samples):>8.0%} "
             f"{result.average_open_cells:>4.0f} "
             f"{result.average_pellets:>7.0f} "
+            f"{result.average_spikes:>6.1f} "
             f"{result.average_dead_end_ratio:>8.3f} "
             f"{result.average_junction_count:>9.1f} "
             f"{result.average_branching_factor:>6.2f} "
@@ -276,6 +283,14 @@ def write_visualization(results: list[LevelResult], output_path: Path) -> None:
         [result.std_corridor_length / 10.0 for result in results],
         "#5f3dc4",
         "Corridor / 10",
+    )
+    plot_mean_with_std(
+        axes[1, 0],
+        levels,
+        [result.average_spikes / 10.0 for result in results],
+        [result.std_spikes / 10.0 for result in results],
+        "#e67700",
+        "Spikes / 10",
     )
     axes[1, 0].set_title("Maze Structure", fontweight="bold")
     axes[1, 0].set_ylabel("Normalized value")
