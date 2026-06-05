@@ -54,7 +54,7 @@ To also generate a Matplotlib visualization:
 python3 experiments/maze_feasibility.py --samples 100 --seed 42 --output results/maze_feasibility.csv --visualization results/maze_feasibility.png
 ```
 
-The experiment reports generation/validity rates, connectivity, pellet reachability, dead-end ratio, junction count, branching factor, corridor length, nearest ghost distance, estimated collection distance, and estimated maze difficulty score.
+The experiment reports generation/validity rates, connectivity, pellet reachability, dead-end ratio, junction count, branching factor, corridor length, nearest ghost distance, estimated collection distance, and estimated maze difficulty score. The visualization shows mean values with standard-deviation bands or error bars where applicable.
 
 ### Difficulty Calibration and Ghost Comparison
 
@@ -70,17 +70,17 @@ For a stronger final-report run, increase `--episodes`, for example:
 python3 experiments/difficulty_and_ghosts.py --episodes 30 --seed 42 --difficulty-output results/difficulty_calibration.csv --ghost-output results/ghost_comparison.csv --visualization results/difficulty_and_ghosts.png
 ```
 
-The difficulty calibration runs random, greedy, and cautious Pacman baselines and reports win rate, pellet completion, survival time, performance score, and ghosts eaten. The ghost comparison keeps maze difficulty fixed and compares random, heuristic, and MCTS ghosts using win rate, pellet completion, steps until the episode ends, and average ghost distance.
+The difficulty calibration runs random, greedy, and cautious Pacman baselines and reports win rate, pellet completion, survival time, performance score, and ghosts eaten. The ghost comparison keeps maze difficulty fixed and compares random, heuristic, and MCTS ghosts using win rate, pellet completion, steps until the episode ends, and average ghost distance. The visualization plots means with standard-deviation bands/error bars.
 
 ### Adaptive Difficulty
 
 Run weak, medium, and strong scripted players through consecutive games with adaptive difficulty enabled:
 
 ```bash
-python3 experiments/adaptive_difficulty.py --episodes 20 --seed 42 --output results/adaptive_difficulty.csv --visualization results/adaptive_difficulty.png
+python3 experiments/adaptive_difficulty.py --episodes 20 --repetitions 5 --seed 42 --output results/adaptive_difficulty.csv --visualization results/adaptive_difficulty.png
 ```
 
-The experiment reports and visualizes difficulty over time, performance score over time, win/loss sequence, and pellet completion over time. The weak player uses random movement, the medium player greedily collects pellets, and the strong player greedily collects pellets while avoiding nearby ghosts.
+The experiment reports and visualizes difficulty over time, performance score over time, win rate over time, and pellet completion over time. The weak player uses random movement, the medium player greedily collects pellets, and the strong player greedily collects pellets while avoiding nearby ghosts. The visualization aggregates repeated adaptive runs and shows mean values with standard-deviation bands.
 
 ## Project Structure
 

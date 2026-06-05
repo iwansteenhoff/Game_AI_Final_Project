@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agents import ghost_heuristic, ghost_mcts, ghost_random
+from agents import ghost_frightened, ghost_heuristic, ghost_mcts, ghost_random
 from game.difficulty import DIFFICULTY_LEVELS, DifficultyConfig, get_config, performance_score
 from game.maze_generator import PELLET, POWER, SPIKE, bfs_wrap, generate_balanced_maze
 from game.pacman_env import PacmanEnv
@@ -61,6 +61,11 @@ class DifficultyCalibrationResult:
     average_survival_time: float
     average_score: float
     average_ghosts_eaten: float
+    std_win_rate: float
+    std_pellet_completion: float
+    std_survival_time: float
+    std_score: float
+    std_ghosts_eaten: float
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,10 @@ class GhostComparisonResult:
     average_steps_until_end: float
     average_pellet_completion: float
     average_ghost_distance: float
+    std_win_rate: float
+    std_steps_until_end: float
+    std_pellet_completion: float
+    std_ghost_distance: float
 
 
 def run_difficulty_calibration(
@@ -105,6 +114,11 @@ def run_difficulty_calibration(
                     average_survival_time=average(result.steps for result in episode_results),
                     average_score=average(result.score for result in episode_results),
                     average_ghosts_eaten=average(result.ghosts_eaten for result in episode_results),
+                    std_win_rate=stddev(result.won for result in episode_results),
+                    std_pellet_completion=stddev(result.pellet_completion for result in episode_results),
+                    std_survival_time=stddev(result.steps for result in episode_results),
+                    std_score=stddev(result.score for result in episode_results),
+                    std_ghosts_eaten=stddev(result.ghosts_eaten for result in episode_results),
                 )
             )
     return results
@@ -148,6 +162,10 @@ def run_ghost_comparison(
             average_steps_until_end=average(result.steps for result in results),
             average_pellet_completion=average(result.pellet_completion for result in results),
             average_ghost_distance=average(result.average_ghost_distance for result in results),
+            std_win_rate=stddev(result.won for result in results),
+            std_steps_until_end=stddev(result.steps for result in results),
+            std_pellet_completion=stddev(result.pellet_completion for result in results),
+            std_ghost_distance=stddev(result.average_ghost_distance for result in results),
         )
         for name, results in grouped_results.items()
     ]
@@ -175,6 +193,7 @@ def run_episode_on_maze(
         maze.grid,
         maze.pacman_start,
         maze.ghost_starts,
+        maze.ghost_respawn_location,
         max_steps=max_steps,
         maze_difficulty_score=maze.difficulty_score,
         generated_greedy_solution=generated_greedy_solution,
@@ -300,7 +319,9 @@ def nearest_ghost_distance(env: PacmanEnv) -> int:
 def choose_ghost_actions(env: PacmanEnv, config: DifficultyConfig) -> list[str]:
     actions = []
     for ghost_id in range(len(env.ghost_positions)):
-        if random.random() > config.ghost_aggression:
+        if ghost_id in env.frightened_ghosts:
+            actions.append(ghost_frightened.choose_action(env, ghost_id))
+        elif random.random() > config.ghost_aggression:
             actions.append(ghost_random.choose_action(env, ghost_id))
         elif config.ghost_agent == "mcts":
             actions.append(ghost_mcts.choose_action(env, ghost_id))
@@ -316,6 +337,14 @@ def average(values) -> float:
     if not values:
         return 0.0
     return sum(values) / len(values)
+
+
+def stddev(values) -> float:
+    values = [float(value) for value in values]
+    if len(values) < 2:
+        return 0.0
+    mean = average(values)
+    return (sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5
 
 
 def write_csv(path: Path, rows: list[object]) -> None:
@@ -384,9 +413,31 @@ def write_visualization(
 
     for agent in PACMAN_AGENTS:
         agent_rows = [row for row in difficulty_results if row.pacman_agent == agent]
-        axes[0, 0].plot(levels, [row.win_rate for row in agent_rows], marker="o", linewidth=2.5, color=colors[agent], label=agent)
-        axes[0, 1].plot(levels, [row.average_pellet_completion for row in agent_rows], marker="o", linewidth=2.5, color=colors[agent], label=agent)
-        axes[1, 0].plot(levels, [row.average_score for row in agent_rows], marker="o", linewidth=2.5, color=colors[agent], label=agent)
+        color = colors[agent]
+        plot_mean_with_std(
+            axes[0, 0],
+            levels,
+            [row.win_rate for row in agent_rows],
+            [row.std_win_rate for row in agent_rows],
+            color,
+            agent,
+        )
+        plot_mean_with_std(
+            axes[0, 1],
+            levels,
+            [row.average_pellet_completion for row in agent_rows],
+            [row.std_pellet_completion for row in agent_rows],
+            color,
+            agent,
+        )
+        plot_mean_with_std(
+            axes[1, 0],
+            levels,
+            [row.average_score for row in agent_rows],
+            [row.std_score for row in agent_rows],
+            color,
+            agent,
+        )
 
     axes[0, 0].set_title("Win Rate by Difficulty", fontweight="bold")
     axes[0, 0].set_xlabel("Difficulty level")
@@ -416,23 +467,29 @@ def write_visualization(
     axes[1, 1].bar(
         [x - 0.24 for x in x_positions],
         [row.win_rate for row in ghost_results],
+        yerr=[row.std_win_rate for row in ghost_results],
         width=0.24,
         color="#2f9e44",
+        capsize=4,
         label="Win rate",
     )
     axes[1, 1].bar(
         x_positions,
         [row.average_pellet_completion for row in ghost_results],
+        yerr=[row.std_pellet_completion for row in ghost_results],
         width=0.24,
         color="#1971c2",
+        capsize=4,
         label="Pellet completion",
     )
     max_steps = max((row.average_steps_until_end for row in ghost_results), default=1.0)
     axes[1, 1].bar(
         [x + 0.24 for x in x_positions],
         [row.average_steps_until_end / max_steps for row in ghost_results],
+        yerr=[row.std_steps_until_end / max_steps for row in ghost_results],
         width=0.24,
         color="#e67700",
+        capsize=4,
         label="Steps, normalized",
     )
     axes[1, 1].set_title("Ghost Agent Comparison", fontweight="bold")
@@ -443,6 +500,13 @@ def write_visualization(
 
     figure.savefig(output_path, dpi=160)
     plt.close(figure)
+
+
+def plot_mean_with_std(axis, x_values, means, stds, color: str, label: str) -> None:
+    lower = [max(0.0, mean - std) for mean, std in zip(means, stds)]
+    upper = [min(1.0, mean + std) for mean, std in zip(means, stds)]
+    axis.plot(x_values, means, marker="o", linewidth=2.5, color=color, label=label)
+    axis.fill_between(x_values, lower, upper, color=color, alpha=0.16, linewidth=0)
 
 
 def parse_args() -> argparse.Namespace:

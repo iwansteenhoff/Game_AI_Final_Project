@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-def choose_action(state, ghost_id: int) -> str:
+def choose_action(state, ghost_id: int, difficulty: int | None = None) -> str:
     best_action = "STAY"
     best_distance = float("inf")
 

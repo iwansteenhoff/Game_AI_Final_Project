@@ -15,7 +15,7 @@ ROLLOUTS_PER_ACTION = 18
 ROLLOUT_DEPTH = 8
 
 
-def choose_action(state, ghost_id: int) -> str:
+def choose_action(state, ghost_id: int, difficulty: int | None = None) -> str:
     legal_actions = state.legal_actions_for_ghost(ghost_id)
     if not legal_actions:
         return "STAY"
@@ -84,7 +84,10 @@ def _legal_actions_from_grid(state, pos):
 
 def _next_position_from_grid(state, pos, action):
     dx, dy = ACTION_DELTAS.get(action, (0, 0))
-    nx, ny = pos[0] + dx, pos[1] + dy
+    width = len(state.grid[0])
+    height = len(state.grid)
+    nx = (pos[0] + dx) % width
+    ny = (pos[1] + dy) % height
     respawn_location = getattr(state, "ghost_respawn_location", None)
     if state.grid[ny][nx] == "#" and (nx, ny) != respawn_location:
         return pos

@@ -31,6 +31,7 @@ from game.difficulty import (
 
 
 DEFAULT_EPISODES = 20
+DEFAULT_REPETITIONS = 5
 DEFAULT_START_DIFFICULTY = 2
 DEFAULT_CANDIDATES = 2
 PLAYER_TYPES = {
@@ -44,6 +45,7 @@ PLAYER_TYPES = {
 class AdaptiveEpisodeResult:
     player_type: str
     pacman_agent: str
+    repetition: int
     episode: int
     difficulty_before: int
     difficulty_after: int
@@ -62,59 +64,62 @@ def run_adaptive_experiment(
     start_difficulty: int,
     candidates: int,
     max_steps: int,
+    repetitions: int,
 ) -> list[AdaptiveEpisodeResult]:
     if seed is not None:
         random.seed(seed)
 
     rows = []
-    for player_type, pacman_agent in PLAYER_TYPES.items():
-        profile = PlayerProfile(history_size=5)
-        difficulty = start_difficulty
+    for repetition in range(1, repetitions + 1):
+        for player_type, pacman_agent in PLAYER_TYPES.items():
+            profile = PlayerProfile(history_size=5)
+            difficulty = start_difficulty
 
-        for episode in range(1, episodes + 1):
-            config = get_config(difficulty)
-            result = run_episode(
-                config=config,
-                target_difficulty=difficulty,
-                pacman_agent=pacman_agent,
-                candidates=candidates,
-                max_steps=max_steps,
-            )
-            profile.add_run(
-                RunMetrics(
-                    difficulty_level=difficulty,
-                    won=result.won,
-                    steps_survived=result.steps,
-                    max_steps=max_steps,
-                    pellets_collected=result.pellets_collected,
-                    total_pellets=result.total_pellets,
-                    power_pellets_collected=result.power_pellets_collected,
-                    ghosts_eaten=result.ghosts_eaten,
-                    deaths_to_ghost=0 if result.won else 1,
-                    maze_difficulty_score=0.0,
-                    ghost_agent_type=config.ghost_agent,
-                    ghost_count=config.ghost_count,
-                    final_score=result.score,
-                )
-            )
-            next_difficulty = profile.recommended_difficulty(difficulty)
-            rows.append(
-                AdaptiveEpisodeResult(
-                    player_type=player_type,
+            for episode in range(1, episodes + 1):
+                config = get_config(difficulty)
+                result = run_episode(
+                    config=config,
+                    target_difficulty=difficulty,
                     pacman_agent=pacman_agent,
-                    episode=episode,
-                    difficulty_before=difficulty,
-                    difficulty_after=next_difficulty,
-                    performance_score=result.score,
-                    recent_performance=profile.recent_performance or result.score,
-                    won=result.won,
-                    pellet_completion=result.pellet_completion,
-                    steps_survived=result.steps,
-                    total_pellets=result.total_pellets,
-                    pellets_collected=result.pellets_collected,
+                    candidates=candidates,
+                    max_steps=max_steps,
                 )
-            )
-            difficulty = next_difficulty
+                profile.add_run(
+                    RunMetrics(
+                        difficulty_level=difficulty,
+                        won=result.won,
+                        steps_survived=result.steps,
+                        max_steps=max_steps,
+                        pellets_collected=result.pellets_collected,
+                        total_pellets=result.total_pellets,
+                        power_pellets_collected=result.power_pellets_collected,
+                        ghosts_eaten=result.ghosts_eaten,
+                        deaths_to_ghost=0 if result.won else 1,
+                        maze_difficulty_score=0.0,
+                        ghost_agent_type=config.ghost_agent,
+                        ghost_count=config.ghost_count,
+                        final_score=result.score,
+                    )
+                )
+                next_difficulty = profile.recommended_difficulty(difficulty)
+                rows.append(
+                    AdaptiveEpisodeResult(
+                        player_type=player_type,
+                        pacman_agent=pacman_agent,
+                        repetition=repetition,
+                        episode=episode,
+                        difficulty_before=difficulty,
+                        difficulty_after=next_difficulty,
+                        performance_score=result.score,
+                        recent_performance=profile.recent_performance or result.score,
+                        won=result.won,
+                        pellet_completion=result.pellet_completion,
+                        steps_survived=result.steps,
+                        total_pellets=result.total_pellets,
+                        pellets_collected=result.pellets_collected,
+                    )
+                )
+                difficulty = next_difficulty
 
     return rows
 
@@ -132,11 +137,11 @@ def write_csv(path: Path, rows: list[AdaptiveEpisodeResult]) -> None:
 
 
 def print_results(rows: list[AdaptiveEpisodeResult]) -> None:
-    print("player episode diff_before diff_after score recent won pellet% steps")
-    print("-----------------------------------------------------------------")
+    print("player rep episode diff_before diff_after score recent won pellet% steps")
+    print("---------------------------------------------------------------------")
     for row in rows:
         print(
-            f"{row.player_type:>6} {row.episode:>7} {row.difficulty_before:>11} "
+            f"{row.player_type:>6} {row.repetition:>3} {row.episode:>7} {row.difficulty_before:>11} "
             f"{row.difficulty_after:>10} {row.performance_score:>5.2f} "
             f"{row.recent_performance:>6.2f} {str(row.won):>5} "
             f"{row.pellet_completion:>7.0%} {row.steps_survived:>5}"
@@ -168,41 +173,13 @@ def write_visualization(rows: list[AdaptiveEpisodeResult], output_path: Path) ->
 
     for player_type in PLAYER_TYPES:
         player_rows = [row for row in rows if row.player_type == player_type]
-        episodes = [row.episode for row in player_rows]
+        episodes = sorted({row.episode for row in player_rows})
         color = colors[player_type]
 
-        axes[0, 0].plot(
-            episodes,
-            [row.difficulty_before for row in player_rows],
-            marker="o",
-            linewidth=2.5,
-            color=color,
-            label=player_type,
-        )
-        axes[0, 1].plot(
-            episodes,
-            [row.performance_score for row in player_rows],
-            marker="o",
-            linewidth=2.0,
-            color=color,
-            label=player_type,
-        )
-        axes[1, 0].step(
-            episodes,
-            [1 if row.won else 0 for row in player_rows],
-            where="mid",
-            linewidth=2.5,
-            color=color,
-            label=player_type,
-        )
-        axes[1, 1].plot(
-            episodes,
-            [row.pellet_completion for row in player_rows],
-            marker="o",
-            linewidth=2.0,
-            color=color,
-            label=player_type,
-        )
+        plot_metric_with_std(axes[0, 0], episodes, player_rows, lambda row: row.difficulty_before, color, player_type, clamp_high=5.0)
+        plot_metric_with_std(axes[0, 1], episodes, player_rows, lambda row: row.performance_score, color, player_type)
+        plot_metric_with_std(axes[1, 0], episodes, player_rows, lambda row: 1.0 if row.won else 0.0, color, player_type)
+        plot_metric_with_std(axes[1, 1], episodes, player_rows, lambda row: row.pellet_completion, color, player_type)
 
     axes[0, 0].set_title("Difficulty Over Time", fontweight="bold")
     axes[0, 0].set_ylabel("Difficulty level")
@@ -215,9 +192,9 @@ def write_visualization(rows: list[AdaptiveEpisodeResult], output_path: Path) ->
     axes[0, 1].axhspan(TARGET_LOW, TARGET_HIGH, color="#2f9e44", alpha=0.12, label="target zone")
     axes[0, 1].legend()
 
-    axes[1, 0].set_title("Win/Loss Sequence", fontweight="bold")
-    axes[1, 0].set_ylabel("Won")
-    axes[1, 0].set_yticks([0, 1], ["loss", "win"])
+    axes[1, 0].set_title("Win Rate Over Time", fontweight="bold")
+    axes[1, 0].set_ylabel("Win rate")
+    axes[1, 0].set_yticks([0, 1], ["0%", "100%"])
     axes[1, 0].set_ylim(-0.1, 1.1)
     axes[1, 0].legend()
 
@@ -231,9 +208,40 @@ def write_visualization(rows: list[AdaptiveEpisodeResult], output_path: Path) ->
     plt.close(figure)
 
 
+def plot_metric_with_std(axis, episodes, rows, value_fn, color: str, label: str, clamp_high: float = 1.0) -> None:
+    means = []
+    stds = []
+    for episode in episodes:
+        values = [float(value_fn(row)) for row in rows if row.episode == episode]
+        mean = average(values)
+        means.append(mean)
+        stds.append(stddev(values))
+
+    lower = [max(0.0, mean - std) for mean, std in zip(means, stds)]
+    upper = [min(clamp_high, mean + std) for mean, std in zip(means, stds)]
+    axis.plot(episodes, means, marker="o", linewidth=2.3, color=color, label=label)
+    axis.fill_between(episodes, lower, upper, color=color, alpha=0.16, linewidth=0)
+
+
+def average(values) -> float:
+    values = list(values)
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def stddev(values) -> float:
+    values = [float(value) for value in values]
+    if len(values) < 2:
+        return 0.0
+    mean = average(values)
+    return (sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the adaptive difficulty experiment.")
     parser.add_argument("--episodes", type=int, default=DEFAULT_EPISODES, help="Consecutive games per scripted player.")
+    parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS, help="Repeated adaptive runs per scripted player.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed. Use --seed -1 for no fixed seed.")
     parser.add_argument("--start-difficulty", type=int, default=DEFAULT_START_DIFFICULTY, help="Initial difficulty level for each player type.")
     parser.add_argument("--candidates", type=int, default=DEFAULT_CANDIDATES, help="Candidate mazes considered per generated level.")
@@ -257,6 +265,7 @@ def main() -> int:
         start_difficulty=args.start_difficulty,
         candidates=args.candidates,
         max_steps=args.max_steps,
+        repetitions=args.repetitions,
     )
     print_results(rows)
 

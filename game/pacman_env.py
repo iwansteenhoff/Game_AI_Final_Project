@@ -49,7 +49,7 @@ class PacmanEnv:
         ghost_respawn_location: Position,
         max_steps: int = 700,
         frighten_duration: int = 2400,
-        ghost_respawn_delay: int = 45,
+        ghost_respawn_delay: int = 180,
         move_speed: float = 0.1,
         cell_size: int = 28,  # For pixel calculations
         maze_difficulty_score: float = 0.0,
@@ -73,6 +73,7 @@ class PacmanEnv:
         self.steps = 0
         self.won = False
         self.lost = False
+        self.end_reason: str | None = None
         self.pellets_collected = 0
         self.total_pellets = 0
         self.ghost_frighten_timers: list[int] = []
@@ -94,6 +95,7 @@ class PacmanEnv:
         self.traveled_steps = 0
         self.won = False
         self.lost = False
+        self.end_reason = None
         self.pellets_collected = 0
         self.power_pellets_collected = 0
         self.ghosts_eaten = 0
@@ -201,13 +203,14 @@ class PacmanEnv:
         tx, ty = state.move_to
         t = state.move_progress
 
-        # Handle wrap visually (important!)
+        # A portal move crosses one cell beyond the board edge. Interpolating
+        # directly between wrapped tile indices would sweep across the board.
         dx = tx - fx
         dy = ty - fy
         if abs(dx) > 1:
-            dx = -((len(self.grid[0]) - 1) * (1 if dx > 0 else -1))
+            dx = -1 if tx > fx else 1
         if abs(dy) > 1:
-            dy = -((len(self.grid) - 1) * (1 if dy > 0 else -1))
+            dy = -1 if ty > fy else 1
 
         interp_x = fx + dx * t
         interp_y = fy + dy * t
@@ -242,6 +245,7 @@ class PacmanEnv:
         if self.done:
             return StepResult(self.won, self.lost, False, False)
 
+        old_pacman_pos = self.pacman_pos
         pellet_collected = False
         power_collected = False
         ghosts_eaten = 0
@@ -256,54 +260,42 @@ class PacmanEnv:
         self.ghost_frighten_timers = [max(0, t - 1)
                                       for t in self.ghost_frighten_timers]
 
-        old_x, old_y = self.pacman_pos
-        self.pacman_pos = self.next_position(self.pacman_pos, pacman_action)
-        px, py = self.pacman_pos
+        if self.pacman_state.just_reached_tile:
+            px, py = self.pacman_pos
 
-        if self.grid[py][px] == SPIKE:
-            self.lost = True
-            return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
+            if self.grid[py][px] == SPIKE:
+                self.lost = True
+                self.end_reason = "Hit a spike"
+                return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten)
 
-        if self.grid[py][px] in {PELLET, POWER}:
-            power_collected = self.grid[py][px] == POWER
-            pellet_collected = True
-            self.grid[py][px] = " "
-            self.pellets_collected += 1
+            if self.grid[py][px] in {PELLET, POWER}:
+                power_collected = self.grid[py][px] == POWER
+                pellet_collected = True
+                self.grid[py][px] = " "
+                self.pellets_collected += 1
 
-            if power_collected:
-                self.power_pellets_collected += 1
-                self.power_timer = self.frighten_duration
-
-                self.ghost_frighten_timers = [
-                    self.frighten_duration if pos is not None else 0
-                    for pos in self.ghost_positions
-                ]
+                if power_collected:
+                    self.power_pellets_collected += 1
+                    self.power_timer = self.frighten_duration
+                    self.ghost_frighten_timers = [
+                        self.frighten_duration if pos is not None else 0
+                        for pos in self.ghost_positions
+                    ]
 
         ghost_eaten = self._resolve_ghost_collision()
-        # ghosts_eaten += self._resolve_pacman_ghost_collisions()
         if self.lost:
             self.deaths_to_ghost += 1
             return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten, ghost_eaten)
 
-        for index, action in enumerate(ghost_actions):
-            if index < len(self.ghost_positions):
-                self.ghost_positions[index] = self.next_position(
-                    self.ghost_positions[index], action
-                )
-
-        ghost_eaten = self._resolve_ghost_collision() or ghost_eaten
-        # ghosts_eaten += self._resolve_pacman_ghost_collisions()
-        if self.lost:
-            self.deaths_to_ghost += 1
-            return StepResult(False, True, pellet_collected, power_collected, ghosts_eaten, ghost_eaten)
-
-        if (old_x, old_y) != self.pacman_pos:
+        if old_pacman_pos != self.pacman_pos:
             self.traveled_steps += 1
 
         if self.pellets_collected >= self.total_pellets:
             self.won = True
+            self.end_reason = "All pellets collected"
         elif self.steps >= self.max_steps:
             self.lost = True
+            self.end_reason = "Time limit reached"
 
         return StepResult(self.won, self.lost, pellet_collected, power_collected, ghosts_eaten, ghost_eaten)
 
@@ -409,17 +401,41 @@ class PacmanEnv:
         return self.power_timer > 0
 
     def _resolve_ghost_collision(self) -> bool:
-        if self.pacman_pos not in self.ghost_positions:
+        colliding_ghosts = [
+            index
+            for index, state in enumerate(self.ghost_states)
+            if state.respawn_timer <= 0 and self._pixel_distance(
+                self.pacman_state.pixel_pos,
+                state.pixel_pos,
+            ) <= self.cell_size * 0.55
+        ]
+        if not colliding_ghosts:
             return False
 
         if not self.powered:
             self.lost = True
+            self.end_reason = "Caught by a ghost"
             return False
 
         eaten_any = False
-        for index, ghost_pos in enumerate(self.ghost_positions):
-            if ghost_pos == self.pacman_pos:
-                self._send_ghost_home(index)
-                self.ghosts_eaten += 1
-                eaten_any = True
+        for index in colliding_ghosts:
+            self._send_ghost_home(index)
+            self.ghosts_eaten += 1
+            eaten_any = True
         return eaten_any
+
+    def _pixel_distance(
+        self,
+        first: list[float] | None,
+        second: list[float] | None,
+    ) -> float:
+        if first is None or second is None:
+            return float("inf")
+
+        board_width = len(self.grid[0]) * self.cell_size
+        board_height = len(self.grid) * self.cell_size
+        dx = abs(first[0] - second[0]) % board_width
+        dy = abs(first[1] - second[1]) % board_height
+        dx = min(dx, board_width - dx)
+        dy = min(dy, board_height - dy)
+        return (dx * dx + dy * dy) ** 0.5

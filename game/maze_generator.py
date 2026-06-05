@@ -84,7 +84,7 @@ def generate_maze(
         if respawn_location is None:
             continue
 
-        _add_pellets(grid, {pacman_start})
+        _add_pellets(grid, {pacman_start, *ghost_starts})
         _add_power_pellets(grid, config.power_pellets, distances)
 
         spike_count = getattr(config, "spike_count", 0)
@@ -136,8 +136,8 @@ def analyze_maze(
     ghost_starts: list[Position],
     config: DifficultyConfig,
 ) -> MazeAnalysis:
-    distances = bfs_wrap(grid, pacman_start)
-    open_cells = _walkable_cells(grid)
+    distances = bfs_wrap_avoiding_spikes(grid, pacman_start)
+    open_cells = _safe_walkable_cells(grid)
     pellets = [
         (x, y)
         for y, row in enumerate(grid)
@@ -147,7 +147,8 @@ def analyze_maze(
     connected = all(cell in distances for cell in open_cells)
     all_pellets_reachable = all(pellet in distances for pellet in pellets)
 
-    branch_counts = [len(wrap_neighbors(grid, cell)) for cell in open_cells]
+    branch_counts = [len(safe_wrap_neighbors(grid, cell))
+                     for cell in open_cells]
     dead_ends = sum(1 for count in branch_counts if count == 1)
     junction_count = sum(1 for count in branch_counts if count >= 3)
     dead_end_ratio = dead_ends / max(1, len(open_cells))
@@ -223,7 +224,8 @@ def solve(maze: GeneratedMaze) -> int:
     ]
 
     all_nodes = [maze.pacman_start] + ball_positions
-    matrix = {pos: bfs_wrap(maze.grid, pos) for pos in all_nodes}
+    matrix = {pos: bfs_wrap_avoiding_spikes(maze.grid, pos)
+              for pos in all_nodes}
 
     route = greedy_route(maze.pacman_start, ball_positions, matrix)
     route = two_opt(maze.pacman_start, route, matrix)
@@ -342,6 +344,32 @@ def bfs_wrap(grid: list[list[str]], start: Position) -> dict[Position, int]:
     return distances
 
 
+def safe_wrap_neighbors(grid: list[list[str]], pos: Position) -> list[Position]:
+    return [
+        neighbor
+        for neighbor in wrap_neighbors(grid, pos)
+        if grid[neighbor[1]][neighbor[0]] != SPIKE
+    ]
+
+
+def bfs_wrap_avoiding_spikes(
+    grid: list[list[str]],
+    start: Position,
+) -> dict[Position, int]:
+    if grid[start[1]][start[0]] in {WALL, SPIKE}:
+        return {}
+
+    queue: deque[Position] = deque([start])
+    distances = {start: 0}
+    while queue:
+        pos = queue.popleft()
+        for neighbor in safe_wrap_neighbors(grid, pos):
+            if neighbor not in distances:
+                distances[neighbor] = distances[pos] + 1
+                queue.append(neighbor)
+    return distances
+
+
 def is_valid_maze(
     grid: list[list[str]],
     pacman_start: Position,
@@ -349,8 +377,8 @@ def is_valid_maze(
     ghost_respawn_location: Position,
     config: DifficultyConfig,
 ) -> bool:
-    distances = bfs_wrap(grid, pacman_start)
-    open_cells = _walkable_cells(grid)
+    distances = bfs_wrap_avoiding_spikes(grid, pacman_start)
+    open_cells = _safe_walkable_cells(grid)
 
     # Ensure all open cells are reachable from the start with gameplay wrap-around
     if any(cell not in distances for cell in open_cells):
@@ -369,7 +397,7 @@ def is_valid_maze(
         return False
 
     # Pacman must have at least 2 possible moves from the start
-    if len(wrap_neighbors(grid, pacman_start)) < 2:
+    if len(safe_wrap_neighbors(grid, pacman_start)) < 2:
         print("Validation failed: Pacman does not have enough initial moves.")
         return False
 
@@ -383,8 +411,11 @@ def is_valid_maze(
         print("Validation failed: Ghost respawn location must be inside a wall.")
         return False
 
-    adjacent_open_cells = [neighbor for neighbor in neighbors(
-        grid, ghost_respawn_location)]
+    adjacent_open_cells = [
+        neighbor
+        for neighbor in neighbors(grid, ghost_respawn_location)
+        if grid[neighbor[1]][neighbor[0]] != SPIKE
+    ]
     if not adjacent_open_cells:
         print("Validation failed: Ghost respawn location is not next to open space.")
         return False
@@ -395,7 +426,7 @@ def is_valid_maze(
 
     # Maintain minimum junctions for maze complexity
     junction_count = sum(1 for cell in open_cells if len(
-        wrap_neighbors(grid, cell)) >= 3)
+        safe_wrap_neighbors(grid, cell)) >= 3)
     min_junctions = max(4, (len(grid) * len(grid[0])) // 60)
     return junction_count >= min_junctions
 
@@ -503,6 +534,15 @@ def _walkable_cells(grid: list[list[str]]) -> list[Position]:
     ]
 
 
+def _safe_walkable_cells(grid: list[list[str]]) -> list[Position]:
+    return [
+        (x, y)
+        for y, row in enumerate(grid)
+        for x, tile in enumerate(row)
+        if tile not in {WALL, SPIKE}
+    ]
+
+
 def _add_spikes(
     grid: list[list[str]],
     count: int,
@@ -543,26 +583,14 @@ def _add_spikes(
     def _would_block_path(spike_pos: Position) -> bool:
         x, y = spike_pos
         grid[y][x] = SPIKE
-        walkable = _walkable_cells(grid)
+        walkable = _safe_walkable_cells(grid)
+        reachable = (
+            bfs_wrap_avoiding_spikes(grid, walkable[0])
+            if walkable
+            else {}
+        )
         grid[y][x] = PELLET
-        if not walkable:
-            return True
-
-        if not walkable:
-            return True
-
-        start = walkable[0]
-        visited = {start}
-        queue = deque([start])
-
-        while queue:
-            cx, cy = queue.popleft()
-            for nx, ny in wrap_neighbors(grid, (cx, cy)):
-                if (nx, ny) not in visited and grid[ny][nx] != WALL and grid[ny][nx] != SPIKE:
-                    visited.add((nx, ny))
-                    queue.append((nx, ny))
-
-        return len(visited) < len(walkable)
+        return not walkable or any(cell not in reachable for cell in walkable)
 
     placed = 0
     for x, y in candidates:
@@ -699,7 +727,7 @@ def _make_odd(value: int) -> int:
 
 def _average_corridor_length(grid: list[list[str]], open_cells: list[Position]) -> float:
     corridor_cells = [cell for cell in open_cells if len(
-        wrap_neighbors(grid, cell)) == 2]
+        safe_wrap_neighbors(grid, cell)) == 2]
     if not corridor_cells:
         return 0.0
     visited: set[Position] = set()
@@ -713,11 +741,11 @@ def _average_corridor_length(grid: list[list[str]], open_cells: list[Position]) 
         stack = [start]
         while stack:
             cell = stack.pop()
-            if cell in visited or len(wrap_neighbors(grid, cell)) != 2:
+            if cell in visited or len(safe_wrap_neighbors(grid, cell)) != 2:
                 continue
             visited.add(cell)
             length += 1
-            stack.extend(neighbor for neighbor in wrap_neighbors(
+            stack.extend(neighbor for neighbor in safe_wrap_neighbors(
                 grid, cell) if neighbor not in visited)
 
         if length:
@@ -739,7 +767,7 @@ def _estimate_collection_distance(
     total = 0
 
     while remaining:
-        distances = bfs_wrap(grid, current)
+        distances = bfs_wrap_avoiding_spikes(grid, current)
         nearest = min(
             remaining, key=lambda pellet: distances.get(pellet, 10_000))
         distance = distances.get(nearest, 10_000)

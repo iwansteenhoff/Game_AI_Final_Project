@@ -4,7 +4,7 @@ import random
 import sys
 import pygame
 import math
-from agents import ghost_heuristic, ghost_mcts, ghost_random
+from agents import ghost_frightened, ghost_heuristic, ghost_mcts, ghost_random
 from game.difficulty import get_config, performance_score, update_difficulty, PlayerProfile, RunMetrics
 from game.maze_generator import PELLET, POWER, SPIKE, WALL, generate_maze, generate_balanced_maze, solve
 from game.pacman_env import PacmanEnv
@@ -14,6 +14,8 @@ CELL_SIZE = 28
 GRID_WIDTH = 21
 GRID_HEIGHT = 21
 FPS = 60  # Higher FPS for smooth movement
+END_MESSAGE_SECONDS = 1.5
+LEVEL_TIME_LIMIT_SECONDS = 600
 
 # Movement speeds (pixels per frame at 60 FPS)
 PACMAN_SPEED = 0.1
@@ -83,6 +85,8 @@ def main() -> int:
 
     running = True
     win_streak = 0
+    restart_frames_remaining = 0
+    end_message: str | None = None
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -92,6 +96,11 @@ def main() -> int:
                     running = False
                 elif event.key == pygame.K_r:
                     env = create_environment(difficulty)
+                    pacman_next_dir = "STAY"
+                    pacman_pixel_pos = env.pacman_pixel_pos[:]
+                    ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
+                    restart_frames_remaining = 0
+                    end_message = None
                 elif event.key in KEY_TO_ACTION:
                     # Buffered input: store next intended direction
                     pacman_next_dir = KEY_TO_ACTION[event.key]
@@ -107,45 +116,52 @@ def main() -> int:
             ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
 
         else:
-            config = get_config(difficulty)
-            if env.won:
-                win_streak += 1
-            last_performance = performance_score(
-                env.pellets_collected,
-                env.total_pellets,
-                env.steps,
-                env.max_steps,
-                env.traveled_steps,
-                env.generated_greedy_solution,
-                env.won,
-                win_streak,
-                env.power_pellets_collected,
-                env.ghosts_eaten,
-            )
-            profile.add_run(
-                RunMetrics(
-                    difficulty,
-                    env.won,
-                    env.steps,
-                    env.max_steps,
+            if restart_frames_remaining == 0:
+                config = get_config(difficulty)
+                if env.won:
+                    win_streak += 1
+                last_performance = performance_score(
                     env.pellets_collected,
                     env.total_pellets,
+                    env.steps,
+                    env.max_steps,
+                    env.traveled_steps,
+                    env.generated_greedy_solution,
+                    env.won,
+                    win_streak,
                     env.power_pellets_collected,
                     env.ghosts_eaten,
-                    env.deaths_to_ghost,
-                    env.maze_difficulty_score,
-                    config.ghost_agent,
-                    len(env.ghost_positions),
-                    last_performance,
                 )
-            )
-            difficulty = profile.recommended_difficulty(difficulty)
-            last_win_rate = profile.recent_win_rate
-            last_pellet_completion = profile.recent_pellet_completion
-            env = create_environment(difficulty)
-            pacman_next_dir = "STAY"
-            pacman_pixel_pos = env.pacman_pixel_pos[:]
-            ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
+                profile.add_run(
+                    RunMetrics(
+                        difficulty,
+                        env.won,
+                        env.steps,
+                        env.max_steps,
+                        env.pellets_collected,
+                        env.total_pellets,
+                        env.power_pellets_collected,
+                        env.ghosts_eaten,
+                        env.deaths_to_ghost,
+                        env.maze_difficulty_score,
+                        config.ghost_agent,
+                        len(env.ghost_positions),
+                        last_performance,
+                    )
+                )
+                difficulty = profile.recommended_difficulty(difficulty)
+                last_win_rate = profile.recent_win_rate
+                last_pellet_completion = profile.recent_pellet_completion
+                end_message = env.end_reason or ("Level complete" if env.won else "Game over")
+                restart_frames_remaining = round(END_MESSAGE_SECONDS * FPS)
+            else:
+                restart_frames_remaining -= 1
+                if restart_frames_remaining == 0:
+                    env = create_environment(difficulty)
+                    pacman_next_dir = "STAY"
+                    pacman_pixel_pos = env.pacman_pixel_pos[:]
+                    ghost_pixel_pos = [pos[:] for pos in env.ghost_pixel_pos]
+                    end_message = None
 
         #  Drawing
         draw_smooth(
@@ -159,6 +175,7 @@ def main() -> int:
             profile.recent_performance,
             last_win_rate,
             last_pellet_completion,
+            end_message,
         )
         pygame.display.flip()
         clock.tick(FPS)
@@ -178,7 +195,7 @@ def create_environment(difficulty: int) -> PacmanEnv:
         generated.pacman_start,
         generated.ghost_starts,
         generated.ghost_respawn_location,
-        max_steps=GRID_WIDTH * GRID_HEIGHT * 20,
+        max_steps=FPS * LEVEL_TIME_LIMIT_SECONDS,
         frighten_duration=config.frighten_duration,
         move_speed=PACMAN_SPEED,
         maze_difficulty_score=generated.difficulty_score,
@@ -192,7 +209,9 @@ def action_is_pressed(pressed: pygame.key.ScancodeWrapper, action: str) -> bool:
 def choose_ghost_actions(env: PacmanEnv, agent_name: str, aggression: float, difficulty: int) -> list[str]:
     actions = []
     for ghost_id in range(len(env.ghost_positions)):
-        if random.random() > aggression:
+        if ghost_id in env.frightened_ghosts:
+            actions.append(ghost_frightened.choose_action(env, ghost_id))
+        elif random.random() > aggression:
             actions.append(ghost_random.choose_action(env, ghost_id))
         elif agent_name == "mcts":
             actions.append(ghost_mcts.choose_action(env, ghost_id, difficulty))
@@ -291,6 +310,7 @@ def draw_smooth(
     recent_performance: float | None,
     recent_win_rate: float | None,
     recent_pellet_completion: float | None,
+    end_message: str | None,
 ) -> None:
     screen.fill(BLACK)
 
@@ -307,6 +327,17 @@ def draw_smooth(
                 pygame.draw.circle(screen, PELLET_COLOR, center, 3)
             elif tile == POWER:
                 pygame.draw.circle(screen, POWER_COLOR, center, 7)
+            elif tile == SPIKE:
+                inset = 4
+                base_y = rect.bottom - inset
+                spike_width = (CELL_SIZE - inset * 2) // 3
+                for spike_index in range(3):
+                    left = rect.left + inset + spike_index * spike_width
+                    right = left + spike_width
+                    tip = ((left + right) // 2, rect.top + inset)
+                    points = [(left, base_y), tip, (right, base_y)]
+                    pygame.draw.polygon(screen, SPIKE_COLOR, points)
+                    pygame.draw.polygon(screen, BLACK, points, width=1)
 
     respawn_rect = pygame.Rect(
         env.ghost_respawn_location[0] * CELL_SIZE,
@@ -346,6 +377,16 @@ def draw_smooth(
                 (12, GRID_HEIGHT * CELL_SIZE + 38))
     screen.blit(font.render(profile_text, True, TEXT),
                 (12, GRID_HEIGHT * CELL_SIZE + 66))
+
+    if end_message is not None:
+        message_surface = font.render(end_message, True, TEXT)
+        message_rect = message_surface.get_rect(
+            center=(GRID_WIDTH * CELL_SIZE // 2, GRID_HEIGHT * CELL_SIZE // 2)
+        )
+        background = message_rect.inflate(28, 20)
+        pygame.draw.rect(screen, BLACK, background)
+        pygame.draw.rect(screen, TEXT, background, width=2)
+        screen.blit(message_surface, message_rect)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,12 @@ class LevelResult:
     average_nearest_ghost_distance: float
     average_collection_distance: float
     average_maze_difficulty_score: float
+    std_dead_end_ratio: float
+    std_branching_factor: float
+    std_corridor_length: float
+    std_nearest_ghost_distance: float
+    std_collection_distance: float
+    std_maze_difficulty_score: float
 
     @property
     def generation_rate(self) -> float:
@@ -80,7 +86,13 @@ def run_experiment(
             analysis = analyze_maze(maze.grid, maze.pacman_start, maze.ghost_starts, config)
             analyses.append(analysis)
 
-            if is_valid_maze(maze.grid, maze.pacman_start, maze.ghost_starts, config):
+            if is_valid_maze(
+                maze.grid,
+                maze.pacman_start,
+                maze.ghost_starts,
+                maze.ghost_respawn_location,
+                config,
+            ):
                 valid_samples += 1
             if analysis.connected:
                 connected_samples += 1
@@ -104,6 +116,12 @@ def run_experiment(
                 average_nearest_ghost_distance=average(a.nearest_ghost_distance for a in analyses),
                 average_collection_distance=average(a.estimated_collection_distance for a in analyses),
                 average_maze_difficulty_score=average(a.difficulty_score for a in analyses),
+                std_dead_end_ratio=stddev(a.dead_end_ratio for a in analyses),
+                std_branching_factor=stddev(a.average_branching_factor for a in analyses),
+                std_corridor_length=stddev(a.average_corridor_length for a in analyses),
+                std_nearest_ghost_distance=stddev(a.nearest_ghost_distance for a in analyses),
+                std_collection_distance=stddev(a.estimated_collection_distance for a in analyses),
+                std_maze_difficulty_score=stddev(a.difficulty_score for a in analyses),
             )
         )
 
@@ -115,6 +133,14 @@ def average(values) -> float:
     if not values:
         return 0.0
     return sum(values) / len(values)
+
+
+def stddev(values) -> float:
+    values = [float(value) for value in values]
+    if len(values) < 2:
+        return 0.0
+    mean = average(values)
+    return (sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5
 
 
 def print_results(results: list[LevelResult]) -> None:
@@ -181,35 +207,45 @@ def write_visualization(results: list[LevelResult], output_path: Path) -> None:
         for spine in axis.spines.values():
             spine.set_color("#d1d5db")
 
-    axes[0, 0].plot(
+    plot_mean_with_std(
+        axes[0, 0],
         levels,
         [result.average_maze_difficulty_score for result in results],
-        marker="o",
-        linewidth=2.5,
-        color="#d9480f",
-        label="Maze score",
+        [result.std_maze_difficulty_score for result in results],
+        "#d9480f",
+        "Maze score",
+        clamp_high=5.0,
     )
     axes[0, 0].set_title("Estimated Maze Difficulty", fontweight="bold")
     axes[0, 0].set_ylabel("Score")
     axes[0, 0].set_ylim(0, 5)
     axes[0, 0].legend()
 
-    axes[0, 1].plot(levels, [result.valid_rate for result in results], marker="o", linewidth=2.5, color="#2f9e44", label="Valid")
-    axes[0, 1].plot(
+    plot_mean_with_std(
+        axes[0, 1],
         levels,
-        [result.connected_samples / max(1, result.requested_samples) for result in results],
-        marker="o",
-        linewidth=2.5,
-        color="#1971c2",
-        label="Connected",
+        [result.valid_rate for result in results],
+        [rate_std(result.valid_rate) for result in results],
+        "#2f9e44",
+        "Valid",
     )
-    axes[0, 1].plot(
+    connected_rates = [result.connected_samples / max(1, result.requested_samples) for result in results]
+    plot_mean_with_std(
+        axes[0, 1],
         levels,
-        [result.reachable_pellet_samples / max(1, result.requested_samples) for result in results],
-        marker="o",
-        linewidth=2.5,
-        color="#7048e8",
-        label="Pellets reachable",
+        connected_rates,
+        [rate_std(rate) for rate in connected_rates],
+        "#1971c2",
+        "Connected",
+    )
+    pellet_rates = [result.reachable_pellet_samples / max(1, result.requested_samples) for result in results]
+    plot_mean_with_std(
+        axes[0, 1],
+        levels,
+        pellet_rates,
+        [rate_std(rate) for rate in pellet_rates],
+        "#7048e8",
+        "Pellets reachable",
     )
     axes[0, 1].set_title("Feasibility Rates", fontweight="bold")
     axes[0, 1].set_ylabel("Rate")
@@ -217,29 +253,29 @@ def write_visualization(results: list[LevelResult], output_path: Path) -> None:
     axes[0, 1].yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
     axes[0, 1].legend()
 
-    axes[1, 0].plot(
+    plot_mean_with_std(
+        axes[1, 0],
         levels,
         [result.average_dead_end_ratio * 10.0 for result in results],
-        marker="o",
-        linewidth=2.5,
-        color="#c92a2a",
-        label="Dead-end ratio x10",
+        [result.std_dead_end_ratio * 10.0 for result in results],
+        "#c92a2a",
+        "Dead-end ratio x10",
     )
-    axes[1, 0].plot(
+    plot_mean_with_std(
+        axes[1, 0],
         levels,
         [result.average_branching_factor / 4.0 for result in results],
-        marker="o",
-        linewidth=2.5,
-        color="#0c8599",
-        label="Branching / 4",
+        [result.std_branching_factor / 4.0 for result in results],
+        "#0c8599",
+        "Branching / 4",
     )
-    axes[1, 0].plot(
+    plot_mean_with_std(
+        axes[1, 0],
         levels,
         [result.average_corridor_length / 10.0 for result in results],
-        marker="o",
-        linewidth=2.5,
-        color="#5f3dc4",
-        label="Corridor / 10",
+        [result.std_corridor_length / 10.0 for result in results],
+        "#5f3dc4",
+        "Corridor / 10",
     )
     axes[1, 0].set_title("Maze Structure", fontweight="bold")
     axes[1, 0].set_ylabel("Normalized value")
@@ -252,15 +288,19 @@ def write_visualization(results: list[LevelResult], output_path: Path) -> None:
     axes[1, 1].bar(
         left_positions,
         [result.average_nearest_ghost_distance for result in results],
+        yerr=[result.std_nearest_ghost_distance for result in results],
         width=bar_width,
         color="#1864ab",
+        capsize=4,
         label="Nearest ghost",
     )
     axes[1, 1].bar(
         right_positions,
         [result.average_collection_distance / 10.0 for result in results],
+        yerr=[result.std_collection_distance / 10.0 for result in results],
         width=bar_width,
         color="#e67700",
+        capsize=4,
         label="Collection / 10",
     )
     axes[1, 1].set_title("Distance Metrics", fontweight="bold")
@@ -269,6 +309,25 @@ def write_visualization(results: list[LevelResult], output_path: Path) -> None:
 
     figure.savefig(output_path, dpi=160)
     plt.close(figure)
+
+
+def plot_mean_with_std(
+    axis,
+    x_values,
+    means,
+    stds,
+    color: str,
+    label: str,
+    clamp_high: float = 1.0,
+) -> None:
+    lower = [max(0.0, mean - std) for mean, std in zip(means, stds)]
+    upper = [min(clamp_high, mean + std) for mean, std in zip(means, stds)]
+    axis.plot(x_values, means, marker="o", linewidth=2.5, color=color, label=label)
+    axis.fill_between(x_values, lower, upper, color=color, alpha=0.16, linewidth=0)
+
+
+def rate_std(rate: float) -> float:
+    return (max(0.0, rate * (1.0 - rate))) ** 0.5
 
 
 def parse_args() -> argparse.Namespace:

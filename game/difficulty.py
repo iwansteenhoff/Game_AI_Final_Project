@@ -41,10 +41,10 @@ class RunMetrics:
 DIFFICULTY_LEVELS: dict[int, DifficultyConfig] = {
     0: DifficultyConfig("random",    1, 6, 0.58, 0, spike_count=0,  frighten_duration=240, ghost_aggression=0.0),
     1: DifficultyConfig("random",    2, 5, 0.54, 14, spike_count=2,  frighten_duration=210, ghost_aggression=0.0),
-    2: DifficultyConfig("heuristic", 2, 4, 0.50, 12, spike_count=4,  frighten_duration=180, ghost_aggression=0.35),
-    3: DifficultyConfig("heuristic", 3, 3, 0.46, 10, spike_count=6,  frighten_duration=150, ghost_aggression=0.60),
-    4: DifficultyConfig("heuristic", 4, 2, 0.42,  8, spike_count=8,  frighten_duration=120, ghost_aggression=0.80),
-    5: DifficultyConfig("mcts",      4, 1, 0.38,  6, ghost_speed=2, spike_count=10, frighten_duration=90, ghost_aggression=0.85),
+    2: DifficultyConfig("heuristic", 2, 4, 0.50, 12, spike_count=4,  frighten_duration=180, ghost_aggression=0.15),
+    3: DifficultyConfig("heuristic", 3, 3, 0.46, 10, spike_count=6,  frighten_duration=150, ghost_aggression=0.30),
+    4: DifficultyConfig("heuristic", 4, 2, 0.42,  8, spike_count=8,  frighten_duration=120, ghost_aggression=0.45),
+    5: DifficultyConfig("mcts",      4, 1, 0.38,  6, ghost_speed=2, spike_count=10, frighten_duration=90, ghost_aggression=0.60),
 }
 
 TARGET_LOW = 0.40
