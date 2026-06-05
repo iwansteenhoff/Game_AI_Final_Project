@@ -685,6 +685,7 @@ def _add_power_pellets(
     center_pellet = min(middle_row_pellets, key=manhattan_distance_to_center)
 
     grid[center_pellet[1]][center_pellet[0]] = POWER
+    count -= 1 if count > 0 else 0  # because we placed one power pellet at the center
 
     pellet_cells = [pos for pos in distances if grid[pos[1]][pos[0]] == PELLET]
 
