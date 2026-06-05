@@ -186,20 +186,6 @@ def analyze_maze(
     )
 
 
-def bfs_wrap(grid: list[list[str]], start: Position) -> dict[Position, int]:
-    queue: deque[Position] = deque([start])
-    distances = {start: 0}
-
-    while queue:
-        pos = queue.popleft()
-        for neighbor in neighbors(grid, pos):
-            if neighbor not in distances:
-                distances[neighbor] = distances[pos] + 1
-                queue.append(neighbor)
-
-    return distances
-
-
 def shortest_path_distance(grid: list[list[str]], start: Position, goal: Position) -> int:
     if start == goal:
         return 0
