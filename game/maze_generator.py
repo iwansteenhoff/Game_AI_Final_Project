@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from collections import deque
 from dataclasses import dataclass
@@ -664,47 +665,38 @@ def _add_power_pellets(
     if count <= 0:
         return
 
-    pellet_cells = [
-        pos
-        for pos, dist in distances.items()
-        if dist > 4 and grid[pos[1]][pos[0]] == PELLET
-    ]
-    if not pellet_cells:
+    width, height = len(grid[0]), len(grid)
+    cx, cy = width // 2, height // 2
+
+    middle_row_pellets = []
+    for pos in distances:
+        x, y = pos
+        is_pellet = grid[y][x] == PELLET
+        is_in_middle_rows = abs(y - cy) <= 1
+        if is_pellet and is_in_middle_rows:
+            middle_row_pellets.append(pos)
+
+    if not middle_row_pellets:
         return
 
-    width = len(grid[0])
-    height = len(grid)
-    center = (width // 2, height // 2)
+    def manhattan_distance_to_center(pos):
+        return abs(pos[0] - cx) + abs(pos[1] - cy)
 
-    def _distance_to_selected(cell: Position, selected: list[Position]) -> int:
-        if not selected:
-            return 10_000
-        return min(abs(cell[0] - other[0]) + abs(cell[1] - other[1]) for other in selected)
+    center_pellet = min(middle_row_pellets, key=manhattan_distance_to_center)
 
-    selected: list[Position] = []
+    grid[center_pellet[1]][center_pellet[0]] = POWER
 
-    middle_candidate = min(
-        pellet_cells,
-        key=lambda pos: abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
-    )
-    if abs(middle_candidate[0] - center[0]) + abs(middle_candidate[1] - center[1]) <= 2:
-        selected.append(middle_candidate)
+    pellet_cells = [pos for pos in distances if grid[pos[1]][pos[0]] == PELLET]
 
-    while len(selected) < count:
-        remaining = [cell for cell in pellet_cells if cell not in selected]
-        if not remaining:
-            break
-        next_cell = max(
-            remaining,
-            key=lambda cell: (
-                _distance_to_selected(cell, selected),
-                distances[cell],
-            ),
+    for i in range(count):
+        angle = (2 * math.pi * i) / count
+        dx, dy = math.cos(angle), math.sin(angle)
+
+        best = max(
+            pellet_cells,
+            key=lambda pos: (pos[0] - cx) * dx + (pos[1] - cy) * dy,
         )
-        selected.append(next_cell)
-
-    for x, y in selected:
-        grid[y][x] = POWER
+        grid[best[1]][best[0]] = POWER
 
 
 def _make_odd(value: int) -> int:
